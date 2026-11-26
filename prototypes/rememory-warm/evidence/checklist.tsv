@@ -1,0 +1,16 @@
+L1	pass	evidence/play.png	lamp-lit wood bench, green felt mat, round brass and cream watch, brick-red tool handles, amber only on the memory panel, faded snowing memory picture, dust motes in the lamp light
+L2	pass	evidence/play.png	each stroke clears the grime under the cloth; the object tells a person's life; repair is done by hand
+L3	pass	evidence/play.png	2D, fixed top-down, one bench fills the window
+F1	pass	evidence/watch-choice.png	wipe, pry and wind each added a clue; 3 of 3 shown
+F2	pass	evidence/memory.png	dust, open, solder and tune each added a clue; 4 of 4 shown
+F3	pass	evidence/radio-start.png	the dust is gone where the cloth passed; index.html auto_finish clears the rest
+F4	pass	evidence/shelf.png	the choice is recorded per object and picks the customer's lines (index.html ITEMS back.a / back.b)
+F5	pass	evidence/play.png	one strip of the memory picture shown after one clue, the rest hatched
+F6	pass	evidence/shelf.png	shelf with both objects, both memories and the amber thread, 同一场雪
+F7	pass	index.html:266	H gives hint1 on the first press and hint2 on the second
+F8	not_assessed	-	sound cannot be heard in a headless run; sfx.step and sfx.done are called in finishStep
+S1	pass	evidence/radio-inside.png	four tools, seven repair steps over two objects
+S2	pass	evidence/shelf.png	the shelf keeps each repaired object's memory
+S3	pass	evidence/radio-start.png	a customer says two lines on arrival and two on pickup; no more than that
+M1	pass	evidence/play.png	the bench, the watch, the cloth clearing the glass to 7:40 and the first clue in the memory panel; no door bell sound was checked
+C1	pass	index.html:496	no fail and no timer; the watch shows a glow on the next tool and spot, the radio (glow: false) does not; one choice per object; H hints small then big

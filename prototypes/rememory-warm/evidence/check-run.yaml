@@ -1,0 +1,104 @@
+# The one-shot's small check (check-run/1).
+# Written by one-shot-check.sh --record: the results are /prototype's reading of
+# evidence/self-check.tsv; never edited by hand.
+kind: check-run/1
+engine: web
+browser: "HeadlessChrome/158.0.0.0"
+time: "2026-11-26 09:53:23"
+checks:
+  - id: boots
+    result: pass
+    evidence:
+      - "evidence/self-check.tsv"
+  - id: shot
+    result: pass
+    evidence:
+      - "evidence/play.png"
+  - id: outlines
+    result: pass
+    evidence:
+      - "evidence/figures.png"
+  - id: brief-words
+    result: pass
+    evidence:
+      - "evidence/brief-words.tsv"
+  - id: emoji
+    result: pass
+    evidence:
+      - "evidence/self-check.tsv"
+  - id: nearest-game
+    result: pass
+    evidence:
+      - "evidence/nearest-game.txt"
+brief_checklist:
+  - id: L1
+    result: pass
+    evidence: "evidence/play.png"
+    item: "Look: 暖色手绘工作台 *(provisional)*。俯视木桌，一盏台灯的暖光打在中间的绿色毛毡垫上，四周暗下去。形状圆润，颜色有角色：黄铜和米白是旧物，砖红是工具把手，墨绿是垫子，琥珀色只给\"记忆\"用。记忆片段是褪色的小幅水彩感画面，带飘雪。签名细节：台灯光圈里慢慢飘的灰尘。every figure drawn, no emoji, no plain circles."
+  - id: L2
+    result: pass
+    evidence: "evidence/play.png"
+    item: "References: PowerWash Simulator（每一下都看得见变干净）*(guessed)*；Unpacking（物品讲一个人的生活）*(guessed)*；Assemble with Care（修旧物的题材，只取\"修理是亲手做的\"这一点）*(guessed)*。"
+  - id: L3
+    result: pass
+    evidence: "evidence/play.png"
+    item: "View: 2D · Camera: 固定俯视，一张工作台占满窗口 *(provisional)*"
+  - id: F1
+    result: pass
+    evidence: "evidence/watch-choice.png"
+    item: "手表：擦表蒙、撬后盖、上发条三步，每步露出一条线索"
+  - id: F2
+    result: pass
+    evidence: "evidence/memory.png"
+    item: "收音机：掸灰、开后盖、接断线、调台四步，每步露出一条线索"
+  - id: F3
+    result: pass
+    evidence: "evidence/radio-start.png"
+    item: "每一下都看得见：擦到哪里干净到哪里，快擦完时剩下的自己清掉"
+  - id: F4
+    result: pass
+    evidence: "evidence/shelf.png"
+    item: "每件旧物一个修法选择（像新的 / 留着痕迹），改变记忆的最后一句和客人的反应"
+  - id: F5
+    result: pass
+    evidence: "evidence/play.png"
+    item: "记忆画面随线索一块一块亮起来"
+  - id: F6
+    result: pass
+    evidence: "evidence/shelf.png"
+    item: "店里的架子：修完的旧物记忆摆上去，两段记忆之间连出\"同一场雪\""
+  - id: F7
+    result: pass
+    evidence: "index.html:266"
+    item: "提示键：先小提示，再大提示"
+  - id: F8
+    result: not_run
+    mark: not assessed
+    why: "sound cannot be heard in a headless run; sfx.step and sfx.done are called in finishStep"
+    item: "完成一步有一声轻响，修完一件有一声更长的"
+  - id: S1
+    result: pass
+    evidence: "evidence/radio-inside.png"
+    item: "旧物修复（工具和步骤） · in the slice"
+  - id: S2
+    result: pass
+    evidence: "evidence/shelf.png"
+    item: "记忆被存在店里（架子） · in the slice"
+  - id: S3
+    result: pass
+    evidence: "evidence/radio-start.png"
+    item: "客人带旧物来、取走 · thin stand-in *(guessed)*"
+  - id: M1
+    result: pass
+    evidence: "evidence/play.png"
+    item: "开场是店里的工作台，门铃响，周奶奶把一块停掉的上海牌手表放在毛毡垫上，只说一句\"它停了很多年了\"。绒布在发光，玩家拿起它在表蒙上来回擦，灰雾一下一下被擦开，露出停在 7 点 40 分的指针，第一条线索落进右边的记忆条。接着拿起撬刀撬开后盖，看到刻着的\"1987.12.24\"。不到一分钟，第一段记忆画面浮出来：一场大雪。"
+  - id: C1
+    result: pass
+    evidence: "index.html:496"
+    item: "没有失败，也没有计时 *(provisional)*。难点是\"看懂\"而不是\"做对\"：第一件手表每一步都有发光提示；第二件收音机不再发光提示，要自己判断先用哪件工具、接哪根线、把调谐旋到哪里（大约第 3 到 5 分钟）。每件旧物最后有一个不能撤回的修法选择，它决定客人取件时说什么。H 键提示先给小的，再给大的。"
+measures:
+  - id: step-time
+    value: 2.000
+    unit: ms
+    by: browser
+    detail: "mean 0.029 ms, slowest 2.000 ms, 258 steps"

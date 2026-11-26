@@ -1,0 +1,50 @@
+time	2026-11-26 09:53:23
+keep	lines	0	pinned	0
+checklist	L1	unlisted	-	Look: 暖色手绘工作台 *(provisional)*。俯视木桌，一盏台灯的暖光打在中间的绿色毛毡垫上，四周暗下去。形状圆润，颜色有角色：黄铜和米白是旧物，砖红是工具把手，墨绿是垫子，琥珀色只给"记忆"用。记忆片段是褪色的小幅水彩感画面，带飘雪。签名细节：台灯光圈里慢慢飘的灰尘。every figure drawn, no emoji, no plain circles.	
+checklist	L2	unlisted	-	References: PowerWash Simulator（每一下都看得见变干净）*(guessed)*；Unpacking（物品讲一个人的生活）*(guessed)*；Assemble with Care（修旧物的题材，只取"修理是亲手做的"这一点）*(guessed)*。	
+checklist	L3	unlisted	-	View: 2D · Camera: 固定俯视，一张工作台占满窗口 *(provisional)*	
+checklist	F1	unlisted	-	手表：擦表蒙、撬后盖、上发条三步，每步露出一条线索	
+checklist	F2	unlisted	-	收音机：掸灰、开后盖、接断线、调台四步，每步露出一条线索	
+checklist	F3	unlisted	-	每一下都看得见：擦到哪里干净到哪里，快擦完时剩下的自己清掉	
+checklist	F4	unlisted	-	每件旧物一个修法选择（像新的 / 留着痕迹），改变记忆的最后一句和客人的反应	
+checklist	F5	unlisted	-	记忆画面随线索一块一块亮起来	
+checklist	F6	unlisted	-	店里的架子：修完的旧物记忆摆上去，两段记忆之间连出"同一场雪"	
+checklist	F7	unlisted	-	提示键：先小提示，再大提示	
+checklist	F8	unlisted	-	完成一步有一声轻响，修完一件有一声更长的	
+checklist	S1	unlisted	-	旧物修复（工具和步骤） · in the slice	
+checklist	S2	unlisted	-	记忆被存在店里（架子） · in the slice	
+checklist	S3	unlisted	-	客人带旧物来、取走 · thin stand-in *(guessed)*	
+checklist	M1	unlisted	-	开场是店里的工作台，门铃响，周奶奶把一块停掉的上海牌手表放在毛毡垫上，只说一句"它停了很多年了"。绒布在发光，玩家拿起它在表蒙上来回擦，灰雾一下一下被擦开，露出停在 7 点 40 分的指针，第一条线索落进右边的记忆条。接着拿起撬刀撬开后盖，看到刻着的"1987.12.24"。不到一分钟，第一段记忆画面浮出来：一场大雪。	
+checklist	C1	unlisted	-	没有失败，也没有计时 *(provisional)*。难点是"看懂"而不是"做对"：第一件手表每一步都有发光提示；第二件收音机不再发光提示，要自己判断先用哪件工具、接哪根线、把调谐旋到哪里（大约第 3 到 5 分钟）。每件旧物最后有一个不能撤回的修法选择，它决定客人取件时说什么。H 键提示先给小的，再给大的。	
+browser	HeadlessChrome/158.0.0.0
+scene	play	0	title
+scene	play	1	play
+digits	log	22px "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", STSong, SimSun, "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", serif	tabular	0
+digits	log	16px "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", STSong, SimSun, "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", serif	tabular	0
+digits	log	20px "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", STSong, SimSun, "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", serif	tabular	0
+digits	log	17px "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", STSong, SimSun, "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", serif	tabular	0
+measure	step-time	play	0.029	2.000	258
+lane	play	stop	4.3	180
+uncaught	play	0
+text	play	canvas	543,298,577,315	24.0	5.75	inside	上海
+text	play	canvas	35,39,201,64	33.0	5.15	inside	一块停掉的手表
+text	play	canvas	34,76,150,93	24.0	4.32	inside	周奶奶的 · 正面
+text	play	canvas	123,175,161,194	27.0	6.59	inside	绒布
+text	play	canvas	139,207,146,218	22.5	6.59	inside	1
+text	play	canvas	114,279,169,298	27.0	8.95	inside	螺丝刀
+text	play	canvas	138,311,146,322	22.5	6.20	inside	2
+text	play	canvas	123,383,161,402	27.0	8.90	inside	烙铁
+text	play	canvas	138,415,146,427	22.5	6.29	inside	3
+text	play	canvas	133,487,152,506	27.0	9.21	inside	手
+text	play	canvas	138,519,146,530	22.5	6.58	inside	4
+text	play	canvas	80,586,137,605	27.0	10.16	inside	翻面  F
+text	play	canvas	78,638,140,657	27.0	10.55	inside	提示  H
+text	play	canvas	912,40,960,64	33.0	5.78	inside	记忆
+text	play	canvas	1213,45,1248,60	28.5	13.63	inside	1 / 3
+text	play	canvas	1160,141,1193,153	16.8	6.78	inside	纺织厂
+text	play	canvas	936,313,1223,331	24.0	10.16	inside	表蒙有一道裂痕。指针停在 7 点 40 分。
+text	play	canvas	238,620,492,640	27.0	13.26	inside	这件工具在这里已经没有活了。
+text	play	canvas	34,691,81,706	21.0	4.39	inside	M 静音
+screen	play	drawn
+shot	play	prototypes/rememory-warm/evidence/play.png
+responds	changed	4
