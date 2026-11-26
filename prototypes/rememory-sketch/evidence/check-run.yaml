@@ -1,0 +1,103 @@
+# The one-shot's small check (check-run/1).
+# Written by one-shot-check.sh --record: the results are /prototype's reading of
+# evidence/self-check.tsv; never edited by hand.
+kind: check-run/1
+engine: web
+browser: "HeadlessChrome/158.0.0.0"
+time: "2026-11-26 10:01:36"
+checks:
+  - id: boots
+    result: pass
+    evidence:
+      - "evidence/self-check.tsv"
+  - id: shot
+    result: pass
+    evidence:
+      - "evidence/play.png"
+  - id: outlines
+    result: pass
+    evidence:
+      - "evidence/figures.png"
+  - id: brief-words
+    result: pass
+    evidence:
+      - "evidence/brief-words.tsv"
+  - id: emoji
+    result: pass
+    evidence:
+      - "evidence/self-check.tsv"
+  - id: nearest-game
+    result: pass
+    evidence:
+      - "evidence/nearest-game.txt"
+brief_checklist:
+  - id: L1
+    result: pass
+    evidence: "evidence/play.png"
+    item: "Look: 铅笔版画感 *(provisional)*。米色纸面，旧物是黑色铅笔线稿，线条会轻轻抖动，暗部用斜排线。全屏只有黑、白、灰，琥珀色只给\"记忆的词\"和拼好的记忆用。客人是半身线稿。签名细节：线条像手绘动画一样微微抖动。every figure drawn, no emoji, no plain circles."
+  - id: L2
+    result: pass
+    evidence: "evidence/wrong.png"
+    item: "References: The Case of the Golden Idol（把词填进空格来确认发生了什么）*(guessed)*；Return of the Obra Dinn（黑白线条，只靠观察）*(guessed)*；Pentiment（纸面和手绘线条的质感）*(guessed)*。"
+  - id: L3
+    result: pass
+    evidence: "evidence/play.png"
+    item: "View: 2D · Camera: 固定，一张纸面：左边旧物，右边记忆和词 *(provisional)*"
+  - id: F1
+    result: pass
+    evidence: "evidence/wrong.png"
+    item: "手表：四处可以细看的地方，正反两面"
+  - id: F2
+    result: pass
+    evidence: "evidence/radio-choice.png"
+    item: "收音机：六处可以细看的地方，后盖要先打开"
+  - id: F3
+    result: pass
+    evidence: "evidence/wrong.png"
+    item: "词盘：看到的和问到的词都收在这里，有用不上的词"
+  - id: F4
+    result: pass
+    evidence: "evidence/play.png"
+    item: "把词拿给客人看，问出新的词"
+  - id: F5
+    result: pass
+    evidence: "evidence/wrong.png"
+    item: "有空格的记忆：填满后告诉你有几处对不上"
+  - id: F6
+    result: pass
+    evidence: "evidence/radio-return.png"
+    item: "拼对以后的修法选择，改变客人取件时说的话"
+  - id: F7
+    result: pass
+    evidence: "evidence/shelf.png"
+    item: "最后一问：认出两段记忆里的同一个人"
+  - id: F8
+    result: pass
+    evidence: "index.html:231"
+    item: "按住空格显示所有能看的地方；H 提示先小后大"
+  - id: S1
+    result: pass
+    evidence: "evidence/radio-choice.png"
+    item: "旧物修复（看、拆、决定怎么修） · thin stand-in *(guessed)*"
+  - id: S2
+    result: pass
+    evidence: "evidence/shelf.png"
+    item: "记忆被存在店里（拼好的记忆） · in the slice"
+  - id: S3
+    result: pass
+    evidence: "evidence/play.png"
+    item: "客人带旧物来、取走，可以给他们看东西 · in the slice *(guessed)*"
+  - id: M1
+    result: pass
+    evidence: "evidence/play.png"
+    item: "周奶奶把一块停掉的手表放在纸上，说\"它停了很多年了\"。玩家点表蒙，看到指针停在 7 点 40 分，一个琥珀色的词\"7点40分\"落进词盘。右边的记忆是一段有六个空格的话。玩家把\"7点40分\"拿给周奶奶看，她说\"那是我下夜班的钟点\"，又得到一个词。第一个空格填上，琥珀色亮起来。"
+  - id: C1
+    result: pass
+    evidence: "evidence/wrong.png"
+    item: "没有失败，也没有计时 *(provisional)*。第一件手表有 6 个空格，词里混着用不上的；填满以后只告诉你\"有几处对不上\"，不告诉你是哪几处（大约第 2 到 4 分钟）。第二件收音机的词要追问两层才问得出来。最后要从三个人里认出\"往厂里走的那个人\"是谁。H 提示先说方向，再帮你清掉一处填错的。"
+measures:
+  - id: step-time
+    value: 7.600
+    unit: ms
+    by: browser
+    detail: "mean 0.111 ms, slowest 7.600 ms, 114 steps"

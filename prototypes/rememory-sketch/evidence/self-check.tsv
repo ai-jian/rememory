@@ -1,0 +1,78 @@
+time	2026-11-26 10:01:36
+keep	lines	0	pinned	0
+checklist	L1	unlisted	-	Look: 铅笔版画感 *(provisional)*。米色纸面，旧物是黑色铅笔线稿，线条会轻轻抖动，暗部用斜排线。全屏只有黑、白、灰，琥珀色只给"记忆的词"和拼好的记忆用。客人是半身线稿。签名细节：线条像手绘动画一样微微抖动。every figure drawn, no emoji, no plain circles.	
+checklist	L2	unlisted	-	References: The Case of the Golden Idol（把词填进空格来确认发生了什么）*(guessed)*；Return of the Obra Dinn（黑白线条，只靠观察）*(guessed)*；Pentiment（纸面和手绘线条的质感）*(guessed)*。	
+checklist	L3	unlisted	-	View: 2D · Camera: 固定，一张纸面：左边旧物，右边记忆和词 *(provisional)*	
+checklist	F1	unlisted	-	手表：四处可以细看的地方，正反两面	
+checklist	F2	unlisted	-	收音机：五处可以细看的地方，后盖要先打开	
+checklist	F3	unlisted	-	词盘：看到的和问到的词都收在这里，有用不上的词	
+checklist	F4	unlisted	-	把词拿给客人看，问出新的词	
+checklist	F5	unlisted	-	有空格的记忆：填满后告诉你有几处对不上	
+checklist	F6	unlisted	-	拼对以后的修法选择，改变客人取件时说的话	
+checklist	F7	unlisted	-	最后一问：认出两段记忆里的同一个人	
+checklist	F8	unlisted	-	按住空格显示所有能看的地方；H 提示先小后大	
+checklist	S1	unlisted	-	旧物修复（看、拆、决定怎么修） · thin stand-in *(guessed)*	
+checklist	S2	unlisted	-	记忆被存在店里（拼好的记忆） · in the slice	
+checklist	S3	unlisted	-	客人带旧物来、取走，可以给他们看东西 · in the slice *(guessed)*	
+checklist	M1	unlisted	-	周奶奶把一块停掉的手表放在纸上，说"它停了很多年了"。玩家点表蒙，看到指针停在 7 点 40 分，一个琥珀色的词"7点40分"落进词盘。右边的记忆是一段有六个空格的话。玩家把"7点40分"拿给周奶奶看，她说"那是我下夜班的钟点"，又得到一个词。第一个空格填上，琥珀色亮起来。	
+checklist	C1	unlisted	-	没有失败，也没有计时 *(provisional)*。第一件手表有 6 个空格，词里混着用不上的；填满以后只告诉你"有几处对不上"，不告诉你是哪几处（大约第 2 到 4 分钟）。第二件收音机的词要追问两层才问得出来。最后要从三个人里认出"往厂里走的那个人"是谁。H 提示先说方向，再帮你清掉一处填错的。	
+browser	HeadlessChrome/158.0.0.0
+scene	play	0	title
+scene	play	1	play
+digits	log	17px "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", STSong, SimSun, "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", serif	tabular	0
+digits	log	20px "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", STSong, SimSun, "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", serif	tabular	0
+digits	log	19px "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", STSong, SimSun, "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", serif	tabular	0
+measure	step-time	play	0.111	7.600	114
+lane	play	stop	1.9	103
+uncaught	play	0
+text	play	canvas	31,25,211,51	36.0	11.16	inside	一块停掉的手表
+text	play	canvas	30,64,146,81	24.0	4.24	inside	周奶奶的 · 正面
+text	play	canvas	319,226,351,243	22.5	4.72	inside	上海
+text	play	canvas	61,516,118,535	27.0	12.44	inside	翻面  F
+text	play	canvas	191,516,253,535	27.0	12.44	inside	提示  H
+text	play	canvas	300,515,386,533	24.0	4.24	inside	细看过 1 / 4
+text	play	canvas	52,582,509,603	28.5	12.44	inside	表蒙上有一道裂痕。指针停在 7 点 40 分，秒针不动。
+text	play	canvas	696,38,732,56	24.0	4.72	inside	记忆
+text	play	canvas	805,103,809,109	30.0	12.44	inside	，
+text	play	canvas	818,87,840,109	30.0	12.44	inside	小
+text	play	canvas	839,87,862,109	30.0	12.44	inside	城
+text	play	canvas	862,89,884,109	30.0	12.44	inside	下
+text	play	canvas	885,89,903,109	30.0	12.44	inside	了
+text	play	canvas	906,87,928,109	30.0	12.44	inside	大
+text	play	canvas	930,88,949,109	30.0	12.44	inside	雪
+text	play	canvas	959,103,963,109	30.0	12.44	inside	，
+text	play	canvas	1070,103,1076,109	30.0	12.44	inside	。
+text	play	canvas	1090,87,1112,109	30.0	12.44	inside	老
+text	play	canvas	1112,88,1132,109	30.0	12.44	inside	周
+text	play	canvas	805,149,809,155	30.0	12.44	inside	，
+text	play	canvas	818,133,840,156	30.0	12.44	inside	去
+text	play	canvas	840,133,862,156	30.0	12.44	inside	接
+text	play	canvas	959,134,979,155	30.0	12.44	inside	的
+text	play	canvas	980,133,1001,155	30.0	12.44	inside	秀
+text	play	canvas	1002,133,1024,154	30.0	12.44	inside	兰
+text	play	canvas	1033,149,1037,155	30.0	12.44	inside	，
+text	play	canvas	1046,134,1068,155	30.0	12.44	inside	在
+text	play	canvas	1164,133,1186,156	30.0	12.44	inside	摔
+text	play	canvas	1187,135,1205,155	30.0	12.44	inside	了
+text	play	canvas	701,188,721,191	30.0	12.44	inside	一
+text	play	canvas	722,179,744,201	30.0	12.44	inside	跤
+text	play	canvas	746,195,752,201	30.0	12.44	inside	。
+text	play	canvas	766,179,788,201	30.0	12.44	inside	表
+text	play	canvas	788,179,810,201	30.0	12.44	inside	进
+text	play	canvas	811,181,829,201	30.0	12.44	inside	了
+text	play	canvas	834,180,853,201	30.0	12.44	inside	雪
+text	play	canvas	854,179,876,201	30.0	12.44	inside	水
+text	play	canvas	885,195,889,201	30.0	12.44	inside	，
+text	play	canvas	898,180,919,201	30.0	12.44	inside	停
+text	play	canvas	920,180,942,201	30.0	12.44	inside	在
+text	play	canvas	1040,195,1046,201	30.0	12.44	inside	。
+text	play	canvas	696,352,856,371	24.0	4.72	inside	词  （点一个拿起来）
+text	play	canvas	708,392,774,412	27.0	7.15	inside	7点40分
+text	play	canvas	810,392,848,411	27.0	7.15	inside	裂痕
+text	play	canvas	884,391,941,411	27.0	7.15	inside	下夜班
+text	play	canvas	822,558,875,576	24.0	3.61	inside	周奶奶
+text	play	canvas	822,592,1144,614	28.5	12.44	inside	七点四十……那是我下夜班的钟点。
+text	play	canvas	30,700,74,714	21.0	4.24	inside	M 静音
+screen	play	drawn
+shot	play	prototypes/rememory-sketch/evidence/play.png
+responds	changed	4

@@ -1,0 +1,16 @@
+L1	pass	evidence/play.png	cream paper, black pencil outlines drawn twice and wandering (index.html:77), diagonal hatching for shade, amber only on the memory words
+L2	pass	evidence/wrong.png	words go into the blanks of a memory and a full sheet says how many are wrong; black line art read by looking closely; paper and hand-drawn line
+L3	pass	evidence/play.png	2D, fixed: the object on the left, the memory, the words and the customer on the right
+F1	pass	evidence/wrong.png	4 of 4 spots looked at on the watch, front and back
+F2	pass	evidence/radio-choice.png	the radio's spots; the note and the wire only after the back panel is opened. six spots (index.html:161)
+F3	pass	evidence/wrong.png	the tray holds seen and asked words, with words that fit no blank
+F4	pass	evidence/play.png	showing 7点40分 to the customer gave her line and the word 下夜班
+F5	pass	evidence/wrong.png	a full sheet with two swapped words says 还有 2 处对不上
+F6	pass	evidence/radio-return.png	the choice picks the customer's lines (index.html:179)
+F7	pass	evidence/shelf.png	the last blank takes 老周 and joins the two memories; a wrong name gets its own line
+F8	pass	index.html:231	Space or the first hint rings every open spot; H gives a direction, then names the word or clears a wrong blank
+S1	pass	evidence/radio-choice.png	looking opens the watch back and the radio panel, and one repair choice ends each object; no hand repair
+S2	pass	evidence/shelf.png	both finished memories stay on the last screen
+S3	pass	evidence/play.png	the customer speaks on arrival and pickup and answers a word shown to them
+M1	pass	evidence/play.png	the watch, the glass looked at, 7点40分 in the tray, the six-blank memory, her line about the night shift and the new word; the first blank filled is in evidence/wrong.png
+C1	pass	evidence/wrong.png	no fail and no timer; six blanks with spare words, only a count of wrong ones; the radio's 手电筒 needs two questions; the last question offers three names; H hints small then big

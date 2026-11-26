@@ -1,0 +1,512 @@
+<!doctype html>
+<!-- PROTOTYPE - NOT FOR PRODUCTION -->
+<!-- Question: 把线索拼成记忆的推理玩法成立吗？自己拼出来的故事，会不会比修出来的更让人在意？ -->
+<!-- Date: 2026-11-26 -->
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>旧物铺 · 拼忆</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  body { font-variant-numeric: tabular-nums; }
+  canvas { display: block; margin: 0 auto; cursor: none; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script src="config.js"></script>
+<script>
+'use strict';
+// ---- Built to be checked ----------------------------------------------------------------
+const params = new URLSearchParams(location.search);
+const tune = new Proxy({}, { get: (_, k) => CONFIG[k].value }); // live: tune.speed is CONFIG.speed.value
+const STEP = 1 / 60;            // simulation step in seconds
+const W = 1280, H = 720;        // logical size
+const PIXEL = false;
+const FONT = '"Noto Serif CJK SC","Source Han Serif SC","Songti SC","STSong","SimSun","Noto Sans CJK SC","PingFang SC","Microsoft YaHei",serif';
+const TITLE = '旧物铺 · 拼忆';
+const CONTROLS = ['点旧物上的地方：细看', '点一个词拿起它，再点空格填进去，或点客人拿给对方看', 'F 翻面   按住空格：显示能看的地方   H 提示   M 静音'];
+const clock = window.GAME_CLOCK || { now: () => performance.now() / 1000 }; // a check may inject one
+const CHEAP = params.get('render') === 'cheap';
+let seed;
+function rng() { // mulberry32; every gameplay random call reads this, never Math.random
+  seed = (seed + 0x6D2B79F5) | 0;
+  let t = Math.imul(seed ^ (seed >>> 15), seed | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+const events = []; // window.game.events: anything the game wants a run to see
+
+// ---- Screen ---------------------------------------------------------------------------
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+function fit() {
+  const k = Math.min(innerWidth / W, innerHeight / H);
+  const s = PIXEL ? Math.max(1, Math.floor(k)) : k;
+  const r = PIXEL ? 1 : s * (devicePixelRatio || 1);
+  canvas.width = Math.round(W * r); canvas.height = Math.round(H * r);
+  canvas.style.width = Math.round(W * s) + 'px'; canvas.style.height = Math.round(H * s) + 'px';
+  canvas.style.marginTop = Math.max(0, Math.floor((innerHeight - H * s) / 2)) + 'px';
+  ctx.setTransform(r, 0, 0, r, 0, 0);
+}
+addEventListener('resize', fit); fit();
+const INK = '#2b2b2b', PAPER = '#e9e4d8', SHEET = '#f4f0e6', AMBER = '#b86a12', AMBER_BG = '#f3c98a', GREY = '#6f6a60';
+function text(s, x, y, size, c, align = 'center', weight = '') {
+  if (state && state.mini && size < 30) return; // a shrunk object drops its small print
+  ctx.fillStyle = c; ctx.font = `${weight} ${size}px ${FONT}`; ctx.textAlign = align;
+  ctx.textBaseline = 'middle'; ctx.fillText(s, x, y);
+}
+const NOHEAD = '，。！？；：、”’）…';
+function wrap(s, maxW, size) { // Chinese wraps by character
+  ctx.font = ` ${size}px ${FONT}`; const lines = []; let cur = '';
+  for (const ch of s) {
+    if (ctx.measureText(cur + ch).width > maxW && cur && !NOHEAD.includes(ch)) { lines.push(cur); cur = ch; } else cur += ch;
+  }
+  if (cur) lines.push(cur); return lines;
+}
+function para(s, x, y, maxW, size, c, lh = 1.5, align = 'left') {
+  const ls = wrap(s, maxW, size); ls.forEach((l, i) => text(l, x, y + i * size * lh, size, c, align)); return ls.length * size * lh;
+}
+function rr(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); }
+function circ(x, y, r) { ctx.beginPath(); ctx.arc(x, y, r, 0, 7); }
+// Pencil: every outline is drawn twice, a little apart, and the gap wanders a few times a second.
+let skN = 0;
+const fract = v => v - Math.floor(v);
+function wob(n) { return (fract(Math.sin(n * 127.1) * 43758.5453) - 0.5) * 2 * tune.boil_amount; }
+function sk(path, lw = 2.2, col = INK) {
+  const f = Math.floor((state ? state.t : 0) * tune.boil_rate); skN++;
+  ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  for (let p = 0; p < 2; p++) { ctx.save(); ctx.translate(wob(skN * 13 + p * 7 + f * 3), wob(skN * 17 + p * 5 + f * 3 + 1)); ctx.globalAlpha *= p ? 0.55 : 1; path(); ctx.stroke(); ctx.restore(); }
+}
+const hatchC = document.createElement('canvas'); hatchC.width = hatchC.height = 8;
+{ const h = hatchC.getContext('2d'); h.strokeStyle = INK; h.lineWidth = 1; h.beginPath(); h.moveTo(-2, 10); h.lineTo(10, -2); h.moveTo(-2, 2); h.lineTo(2, -2); h.moveTo(6, 10); h.lineTo(10, 6); h.stroke(); }
+const HATCH = ctx.createPattern(hatchC, 'repeat');
+function hatch(path, a = 0.45) { ctx.save(); ctx.globalAlpha *= a; ctx.fillStyle = HATCH; path(); ctx.fill(); ctx.restore(); }
+function wash(path, col) { ctx.fillStyle = col; path(); ctx.fill(); }
+
+// ---- Input ----------------------------------------------------------------------------
+const down = new Set(), hit = new Set();
+const pressed = code => hit.has(code);
+addEventListener('keydown', e => {
+  startAudio();
+  if (!e.repeat) { down.add(e.code); hit.add(e.code); }
+  if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
+});
+addEventListener('keyup', e => down.delete(e.code));
+addEventListener('blur', () => down.clear());
+const mouse = { x: W / 2, y: H / 2, clicked: false };
+function toLogical(e) { const r = canvas.getBoundingClientRect(); return [(e.clientX - r.left) / r.width * W, (e.clientY - r.top) / r.height * H]; }
+addEventListener('pointermove', e => { [mouse.x, mouse.y] = toLogical(e); });
+addEventListener('pointerdown', e => { startAudio(); [mouse.x, mouse.y] = toLogical(e); mouse.clicked = true; });
+
+// ---- Audio ----------------------------------------------------------------------------
+let audio = null, muted = false;
+function startAudio() {
+  if (!audio) {
+    const ac = window.GAME_AUDIO || new (window.AudioContext || window.webkitAudioContext)();
+    const out = ac.createGain(); out.gain.value = muted ? 0 : tune.volume;
+    out.connect(ac.destination); audio = { ac, out };
+  }
+  if (audio.ac.state === 'suspended') audio.ac.resume();
+}
+function setMuted(m) { muted = m; if (audio) audio.out.gain.value = m ? 0 : tune.volume; }
+addEventListener('tune', () => setMuted(muted));
+function tone(freq, dur, type = 'sine', vol = 0.2, delay = 0) {
+  if (!audio || muted) return;
+  const t = audio.ac.currentTime + delay, o = audio.ac.createOscillator(), g = audio.ac.createGain();
+  o.type = type; o.frequency.value = freq;
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  o.connect(g).connect(audio.out); o.start(t); o.stop(t + dur);
+}
+const sfx = {
+  look() { for (let i = 0; i < 4; i++) tone(900 + rng() * 900, 0.04, 'sawtooth', 0.03, i * 0.05); }, // a pencil scratch
+  word() { tone(740, 0.3, 'sine', 0.14); },
+  pick() { tone(520, 0.06, 'triangle', 0.12); },
+  place() { tone(330, 0.1, 'triangle', 0.14); },
+  no() { tone(150, 0.16, 'triangle', 0.12); },
+  talk() { tone(260, 0.07, 'triangle', 0.08); tone(300, 0.07, 'triangle', 0.08, 0.08); },
+  solved() { [392, 494, 587, 784].forEach((f, i) => tone(f, 0.7, 'sine', 0.15, i * 0.16)); },
+  bell() { tone(1568, 0.5, 'sine', 0.12); tone(1976, 0.7, 'sine', 0.09, 0.16); },
+};
+
+// ---- The story: two objects, one snowy night ---------------------------------------------
+const O = { x: 335, y: 280 }; // the middle of the object
+const B = s => ({ b: s });
+const ITEMS = [
+  { id: 'watch', name: '一块停掉的手表', owner: '周奶奶',
+    arrive: ['它停了很多年了。', '老周一直不让修。……他今年春天走了。'], shrug: '这个……我说不上来。',
+    spots: [
+      { id: 'glass', side: 'front', x: 0, y: 0, r: 92, needs: [], see: '表蒙上有一道裂痕。指针停在 7 点 40 分，秒针不动。', frags: ['7点40分', '裂痕'] },
+      { id: 'strap', side: 'front', x: 0, y: 170, r: 44, needs: [], see: '表带第三个孔磨得最深。孔眼里嵌着干掉的泥。', frags: ['干泥'] },
+      { id: 'back', side: 'back', x: 0, y: 0, r: 100, needs: [], see: '撬开后盖。盖子里面刻着一行小字："1987.12.24 兰"。', frags: ['1987年12月24日', '兰'], opens: true },
+      { id: 'move', side: 'back', x: -6, y: -4, r: 78, needs: ['back'], see: '机芯上有一圈干掉的水渍。齿轮里卡着一粒砂。', frags: ['水渍', '一粒砂'] },
+    ],
+    show: {
+      '7点40分': { say: '七点四十……那是我下夜班的钟点。', frags: ['下夜班'] },
+      '1987年12月24日': { say: '那天的雪下得好大，厂里的班车都停了。', frags: ['班车停了'] },
+      '裂痕': { say: '他在厂门口摔的。爬起来还冲我笑。', frags: ['厂门口'] },
+      '干泥': { say: '他是走来的。十几里地，一步一步走来的。', frags: ['走了十几里'] },
+      '一粒砂': { say: '他是走来的。十几里地，一步一步走来的。', frags: ['走了十几里'] },
+      '兰': { say: '兰是我。秀兰。这表是我攒了半年的工资买的。', frags: [] },
+      '水渍': { say: '他一直不让修。说修好了，那天就没了。', frags: [] },
+    },
+    parts: [B('1987年12月24日'), '，小城下了大雪，', B('班车停了'), '。老周', B('走了十几里'), '，去接', B('下夜班'), '的秀兰，在', B('厂门口'), '摔了一跤。表进了雪水，停在', B('7点40分'), '。'],
+    choice: { ask: '现在你知道那道裂痕是怎么来的了。', a: '换一片新表蒙', b: '留着这道裂痕' },
+    back: { a: ['真亮，跟他刚戴上那天一样。', '……就是那道印子，我刚才找了一下。'], b: ['这道印子还在。', '那天他摔了一跤，爬起来还冲我笑。……谢谢你。'] },
+    kept: { a: '表蒙换成了新的', b: '裂痕留下了' } },
+  { id: 'radio', name: '一台半导体收音机', owner: '小陈',
+    arrive: ['我爸的收音机。他以前开厂里的班车。', '我妈说，修不好也没关系。'], shrug: '这个我不清楚。那时候我太小了。',
+    spots: [
+      { id: 'knob', side: 'front', x: 150, y: 78, r: 34, needs: [], see: '调谐旋钮不是原装的，是一个牙膏盖，拿胶粘上去的。', frags: ['牙膏盖'] },
+      { id: 'dial', side: 'front', x: 105, y: -64, r: 56, needs: [], see: '指针停在 1035 千赫，没有再动过。', frags: ['1035'] },
+      { id: 'handle', side: 'front', x: 0, y: -148, r: 40, needs: [], see: '提手磨得发亮。它被人提着走过很多地方。', frags: ['磨亮的提手'] },
+      { id: 'panel', side: 'back', x: 0, y: 0, r: 112, needs: [], see: '拧下四颗螺丝，打开后盖。里面有电池仓、喇叭和一块电路板。', frags: [], opens: true },
+      { id: 'note', side: 'back', x: 150, y: 72, r: 42, needs: ['panel'], see: '电池仓里夹着一张纸条，是女人的字："七点半 县广播"。', frags: ['县广播'] },
+      { id: 'wire', side: 'back', x: -70, y: 62, r: 36, needs: ['panel'], see: '喇叭线断了。断口不整齐，是被人用手扯断的。', frags: ['扯断的线'] },
+    ],
+    show: {
+      '牙膏盖': { say: '我小时候拧掉的，那年我六岁。我妈拿牙膏盖补上了。', frags: ['六岁的儿子'] },
+      '1035': { say: '县广播站。我爸是开班车的，大雪那晚车开不动了。', frags: ['班车司机'] },
+      '班车司机': { say: '他把车停在半路，领着一车女工走回城里。', frags: ['走回城里'] },
+      '县广播': { say: '那晚我妈一直守着它，等广播念我爸的名字。', frags: ['等广播念他的名字'] },
+      '走回城里': { say: '他说路上遇见一个往厂里走的人，他把手电筒给了人家。', frags: ['手电筒'] },
+      '扯断的线': { say: '……我爸走的那年，我妈扯的。说不想再听了。', frags: ['不想再听'] },
+      '磨亮的提手': { say: '他出车总带着它。', frags: [] },
+    },
+    parts: ['大雪那晚，', B('班车司机'), '陈德山把车停在半路，领着工人', B('走回城里'), '。他的妻子和', B('六岁的儿子'), '守着收音机，', B('等广播念他的名字'), '。路上，他把', B('手电筒'), '给了一个往厂里走的人。'],
+    choice: { ask: '现在你知道那根线是谁扯断的了。', a: '把线接上，让它再响', b: '不接，留着断线' },
+    back: { a: ['……响了。是这个声音。', '我妈那儿，我去跟她说。'], b: ['也好。她扯断的，就让它断着吧。', '牙膏盖还在就行。'] },
+    kept: { a: '线接上了', b: '断线留下了' } },
+];
+const DECOYS = ['裂痕', '干泥', '一粒砂', '兰', '水渍', '牙膏盖', '1035', '磨亮的提手', '县广播', '扯断的线', '不想再听'];
+const LINK = { ask: ['陈德山把手电筒给了一个往厂里走的人。那个人是', B('老周'), '。'], opts: ['小陈', '老周', '陈德山'],
+  wrong: { '小陈': '小陈那年才六岁，守在收音机旁边。', '陈德山': '陈德山是给出手电筒的人。' },
+  end: '同一场雪。一个人走回城里，一个人往厂里走，在路上交了一支手电筒。' };
+
+// ---- State ------------------------------------------------------------------------------
+let scene, state;
+function startItem(i) {
+  const it = ITEMS[i], nb = it.parts.filter(p => p.b).length;
+  Object.assign(state, { item: i, phase: 'arrive', line: 0, side: 'front', found: [], frags: [], shown: [], fills: new Array(nb).fill(null), sel: null,
+    cap: '', capT: 0, say: it.arrive[0], hint: 0, hintKey: '', reveal: 0, choice: '', phaseT: 0, pop: {}, wrongN: -1 });
+  sfx.bell();
+}
+function reset() {
+  seed = Number(params.get('seed')) || CONFIG.seed;
+  state = { t: 0, score: 0, gained: '', shelf: [], linkDone: false, linkMsg: '' };
+  startItem(0);
+}
+const item = () => ITEMS[state.item];
+const has = id => state.found.includes(id);
+const answers = it => it.parts.filter(p => p.b).map(p => p.b);
+function caption(s) { state.cap = s; state.capT = tune.message_time; }
+function addFrags(list) {
+  let n = 0;
+  list.forEach(f => { if (!tune.decoys && DECOYS.includes(f) && !item().show[f]) return; if (!state.frags.includes(f)) { state.frags.push(f); state.pop[f] = 1; n++; } });
+  if (n) sfx.word(); return n;
+}
+function spotsOpen() { return item().spots.filter(s => s.side === state.side && s.needs.every(has)); }
+function spotAt(x, y) { // the smallest open spot under the pointer; an opened lid no longer catches clicks
+  let best = null;
+  spotsOpen().forEach(s => { if (s.opens && has(s.id)) return; const d = Math.hypot(x - O.x - s.x, y - O.y - s.y); if (d < s.r + tune.hotspot_slack && (!best || s.r < best.r)) best = s; });
+  return best;
+}
+function examine(s) {
+  const first = !has(s.id); if (first) { state.found.push(s.id); state.score++; events.push({ look: s.id }); }
+  caption(s.see); sfx.look(); addFrags(s.frags);
+}
+function show(f) {
+  const it = item(), r = it.show[f]; sfx.talk();
+  if (!state.shown.includes(f)) state.shown.push(f);
+  if (!r) { state.say = it.shrug; return; }
+  state.say = r.say; addFrags(r.frags); events.push({ show: f });
+}
+function checkFills() {
+  const it = item(), ans = answers(it); if (state.fills.some(f => !f)) { state.wrongN = -1; return; }
+  const wrong = ans.filter((a, i) => state.fills[i] !== a).length; state.wrongN = wrong;
+  if (!wrong) { state.phase = 'solved'; state.phaseT = 0; state.sel = null; sfx.solved(); caption('这段记忆完整了。'); events.push({ solved: it.id }); }
+  else { sfx.no(); caption(tune.tell_wrong_count ? `还有 ${wrong} 处对不上。点一个填好的空格可以把它擦掉。` : '还对不上。点一个填好的空格可以把它擦掉。'); }
+}
+function hint() {
+  const it = item(), unlooked = it.spots.filter(s => !has(s.id) && s.needs.every(has)), ans = answers(it);
+  const ask = state.frags.filter(f => !state.shown.includes(f) && it.show[f] && it.show[f].frags.some(n => !state.frags.includes(n)));
+  const key = unlooked.length ? 'look' : ask.length ? 'ask' : 'fill';
+  if (state.hintKey !== key) { state.hintKey = key; state.hint = 0; }
+  state.hint = Math.min(2, state.hint + 1); sfx.pick();
+  if (key === 'look') { state.reveal = tune.reveal_time; const other = unlooked.every(s => s.side !== state.side);
+    caption(state.hint === 1 ? '这件东西上还有没细看的地方。' : other ? '这一面都看过了。按 F 翻面，再看看另一面。' : '圈出来的地方还没细看。点一下。'); }
+  else if (key === 'ask') caption(state.hint === 1 ? `有些词，${it.owner}也许能说出点什么。` : `拿起"${ask[0]}"，再点${it.owner}，给对方看看。`);
+  else if (state.hint === 1) caption('词都齐了。把记忆从头念一遍，看哪一处不通。');
+  else { let n = 0; state.fills.forEach((f, i) => { if (f && f !== ans[i] && n < tune.hint_clears) { state.fills[i] = null; n++; } });
+    const empty = state.fills.findIndex(f => !f); caption(n ? '擦掉了一处对不上的。' : empty >= 0 ? `有一个空格该填"${ans[empty]}"。` : '都对了。'); state.wrongN = -1; }
+}
+
+// ---- Layout -------------------------------------------------------------------------------
+const FLIP = { x: 30, y: 506, w: 120, h: 40 }, HINT = { x: 162, y: 506, w: 120, h: 40 };
+const CAP = { x: 30, y: 560, w: 610, h: 136 }, SHEETR = { x: 676, y: 24, w: 580, h: 300 }, TRAY = { x: 676, y: 338, w: 580, h: 190 }, WHO = { x: 676, y: 542, w: 580, h: 154 };
+const CH_A = { x: 60, y: 620, w: 270, h: 56 }, CH_B = { x: 340, y: 620, w: 270, h: 56 };
+const inside = (r, x, y) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
+function layoutSentence(parts, fills, x0, y0, maxW, size, lh, minB = 92) { // text and blanks flow together
+  ctx.font = ` ${size}px ${FONT}`; const out = []; let x = x0, y = y0, bi = 0;
+  parts.forEach(p => {
+    if (p.b) { const t = fills[bi], w = Math.max(minB, t ? ctx.measureText(t).width + 22 : 0); if (x + w > x0 + maxW) { x = x0; y += lh; }
+      out.push({ blank: bi, x, y: y - size * 0.8, w, h: size * 1.6, text: t }); x += w + 4; bi++; }
+    else for (const ch of p) { const w = ctx.measureText(ch).width; if (x + w > x0 + maxW && !NOHEAD.includes(ch)) { x = x0; y += lh; } out.push({ ch, x, y }); x += w; }
+  });
+  out.bottom = y + lh / 2; return out;
+}
+function drawSentence(L, size, solved, wrongMark) {
+  L.forEach(t => {
+    if (t.ch) { text(t.ch, t.x, t.y, size, INK, 'left'); return; }
+    if (t.text) { wash(() => rr(t.x + 2, t.y + 2, t.w - 4, t.h - 4, 5), solved ? AMBER_BG : '#f6dcae'); text(t.text, t.x + t.w / 2, t.y + t.h / 2 + 1, size - 1, solved ? '#6b3a06' : INK); }
+    else hatch(() => rr(t.x + 2, t.y + 2, t.w - 4, t.h - 4, 5), 0.3);
+    if (!solved) sk(() => rr(t.x + 2, t.y + 2, t.w - 4, t.h - 4, 5), 1.6, t.text ? AMBER : INK);
+  });
+}
+function chipRects(list, x0, y0, maxW, size = 19) {
+  ctx.font = ` ${size}px ${FONT}`; const out = []; let x = x0, y = y0;
+  list.forEach(f => { const w = ctx.measureText(f).width + 26; if (x + w > x0 + maxW) { x = x0; y += 44; } out.push({ f, x, y, w, h: 36 }); x += w + 10; });
+  return out;
+}
+function drawChip(c, on, used, pop) {
+  wash(() => rr(c.x, c.y, c.w, c.h, 8), on ? AMBER : used ? '#eadfc8' : AMBER_BG);
+  if (pop > 0) { ctx.save(); ctx.globalAlpha = pop; wash(() => rr(c.x - 4, c.y - 4, c.w + 8, c.h + 8, 10), '#fff3d6'); ctx.restore(); wash(() => rr(c.x, c.y, c.w, c.h, 8), AMBER_BG); }
+  sk(() => rr(c.x, c.y, c.w, c.h, 8), 1.6, on ? '#6b3a06' : AMBER);
+  text(c.f, c.x + c.w / 2, c.y + c.h / 2 + 1, 19, on ? '#fff8ea' : used ? '#8a7350' : '#5a3206');
+}
+function button(r, label, on) { wash(() => rr(r.x, r.y, r.w, r.h, 8), on ? AMBER_BG : SHEET); sk(() => rr(r.x, r.y, r.w, r.h, 8), 1.8); text(label, r.x + r.w / 2, r.y + r.h / 2 + 1, 19, INK); }
+
+// ---- Drawing: the objects, in pencil ---------------------------------------------------------
+function watchFront(crackGone) {
+  [-1, 1].forEach(d => { const y = d < 0 ? O.y - 230 : O.y + 92; hatch(() => rr(O.x - 40, y, 80, 138, 8), 0.5); sk(() => rr(O.x - 40, y, 80, 138, 8)); });
+  [0, 1, 2].forEach(i => { wash(() => circ(O.x, O.y + 140 + i * 26, i === 2 ? 5.5 : 3.5), INK); });
+  wash(() => circ(O.x, O.y, 118), PAPER); hatch(() => circ(O.x, O.y, 118), 0.35); wash(() => circ(O.x, O.y, 98), SHEET);
+  sk(() => circ(O.x, O.y, 118), 2.6); sk(() => circ(O.x, O.y, 98));
+  sk(() => rr(O.x + 118, O.y - 13, 20, 26, 4));
+  sk(() => { ctx.beginPath(); for (let i = 0; i < 12; i++) { const a = i * Math.PI / 6, r0 = i % 3 ? 86 : 80; ctx.moveTo(O.x + Math.sin(a) * r0, O.y - Math.cos(a) * r0); ctx.lineTo(O.x + Math.sin(a) * 93, O.y - Math.cos(a) * 93); } }, 2);
+  text('上海', O.x, O.y - 44, 16, GREY);
+  const hA = 460 / 720 * 6.283, mA = 40 / 60 * 6.283;
+  sk(() => { ctx.beginPath(); ctx.moveTo(O.x, O.y); ctx.lineTo(O.x + Math.sin(hA) * 50, O.y - Math.cos(hA) * 50); }, 6);
+  sk(() => { ctx.beginPath(); ctx.moveTo(O.x, O.y); ctx.lineTo(O.x + Math.sin(mA) * 80, O.y - Math.cos(mA) * 80); }, 3.6);
+  sk(() => { ctx.beginPath(); ctx.moveTo(O.x, O.y + 14); ctx.lineTo(O.x, O.y - 84); }, 1.2);
+  wash(() => circ(O.x, O.y, 5), INK);
+  if (!crackGone) sk(() => { ctx.beginPath(); ctx.moveTo(O.x + 70, O.y + 56); ctx.lineTo(O.x + 34, O.y + 20); ctx.lineTo(O.x + 44, O.y - 8); ctx.lineTo(O.x + 10, O.y - 50); ctx.moveTo(O.x + 34, O.y + 20); ctx.lineTo(O.x + 12, O.y + 30); }, 1.3);
+}
+function gear(x, y, r, n) { sk(() => { ctx.beginPath(); for (let i = 0; i < n * 2; i++) { const rr2 = i % 2 ? r : r * 0.8, a = i * Math.PI / n; ctx.lineTo(x + Math.cos(a) * rr2, y + Math.sin(a) * rr2); } ctx.closePath(); }, 1.8); sk(() => circ(x, y, r * 0.22), 1.6); }
+function watchBack() {
+  [-1, 1].forEach(d => { const y = d < 0 ? O.y - 230 : O.y + 92; hatch(() => rr(O.x - 40, y, 80, 138, 8), 0.5); sk(() => rr(O.x - 40, y, 80, 138, 8)); });
+  wash(() => circ(O.x, O.y, 118), PAPER); hatch(() => circ(O.x, O.y, 118), 0.35); sk(() => circ(O.x, O.y, 118), 2.6); sk(() => rr(O.x - 138, O.y - 13, 20, 26, 4));
+  if (has('back')) {
+    wash(() => circ(O.x, O.y, 104), SHEET); sk(() => circ(O.x, O.y, 104));
+    gear(O.x - 34, O.y - 26, 44, 14); gear(O.x + 38, O.y + 10, 34, 12); gear(O.x - 8, O.y + 54, 26, 10);
+    hatch(() => { ctx.beginPath(); ctx.ellipse(O.x + 30, O.y - 58, 44, 22, 0.4, 0, 7); }, 0.7); sk(() => { ctx.beginPath(); ctx.ellipse(O.x + 30, O.y - 58, 44, 22, 0.4, 0, 7); }, 1.2);
+    wash(() => circ(O.x + 62, O.y + 50, 4), INK);
+    const lx = O.x + 196, ly = O.y + 120; wash(() => circ(lx, ly, 76), SHEET); sk(() => circ(lx, ly, 76), 2.4); sk(() => circ(lx, ly, 64), 1.2);
+    text('1987.12.24', lx, ly - 10, 19, INK); text('兰', lx, ly + 22, 25, INK);
+  } else {
+    wash(() => circ(O.x, O.y, 104), SHEET); sk(() => circ(O.x, O.y, 104)); sk(() => circ(O.x, O.y, 90), 1.2);
+    for (let i = 0; i < 6; i++) { const a = i * 1.047; sk(() => rr(O.x + Math.cos(a) * 97 - 5, O.y + Math.sin(a) * 97 - 5, 10, 10, 2), 1.4); }
+    text('防水', O.x, O.y - 10, 18, GREY); text('全钢', O.x, O.y + 18, 18, GREY);
+  }
+}
+function radioBody() { wash(() => rr(O.x - 215, O.y - 135, 430, 270, 20), SHEET); hatch(() => rr(O.x - 215, O.y + 100, 430, 35, 12), 0.6); sk(() => rr(O.x - 215, O.y - 135, 430, 270, 20), 2.6);
+  sk(() => rr(O.x - 60, O.y - 164, 120, 30, 8)); sk(() => rr(O.x - 46, O.y - 156, 92, 16, 5), 1.4); }
+function radioFront(wired) {
+  radioBody(); sk(() => rr(O.x - 195, O.y - 112, 190, 205, 12));
+  ctx.fillStyle = INK; for (let j = 0; j < 8; j++) for (let i = 0; i < 8; i++) { circ(O.x - 180 + i * 23, O.y - 96 + j * 24.5, 4.2); ctx.fill(); }
+  sk(() => rr(O.x + 15, O.y - 112, 180, 96, 8));
+  sk(() => { ctx.beginPath(); for (let f = 0; f <= 20; f++) { const x = O.x + 27 + f / 20 * 156; ctx.moveTo(x, O.y - 70); ctx.lineTo(x, O.y - (f % 5 ? 60 : 52)); } }, 1.2);
+  [540, 800, 1070, 1330, 1600].forEach(f => text(String(f), O.x + 27 + (f - 540) / 1060 * 156, O.y - 90, 14, INK)); text('中波 千赫', O.x + 105, O.y - 36, 14, GREY);
+  const nx = O.x + 27 + (1035 - 540) / 1060 * 156; sk(() => { ctx.beginPath(); ctx.moveTo(nx, O.y - 106); ctx.lineTo(nx, O.y - 24); }, 2.4);
+  hatch(() => circ(O.x + 60, O.y + 78, 27), 0.9); sk(() => circ(O.x + 60, O.y + 78, 27)); sk(() => { ctx.beginPath(); ctx.moveTo(O.x + 60, O.y + 78); ctx.lineTo(O.x + 46, O.y + 62); }, 2.4);
+  wash(() => circ(O.x + 150, O.y + 78, 23), '#fff'); sk(() => circ(O.x + 150, O.y + 78, 23)); sk(() => circ(O.x + 150, O.y + 78, 12), 1.2); // the toothpaste cap
+  sk(() => { ctx.beginPath(); for (let i = 0; i < 14; i++) { const a = i * 0.449; ctx.moveTo(O.x + 150 + Math.cos(a) * 16, O.y + 78 + Math.sin(a) * 16); ctx.lineTo(O.x + 150 + Math.cos(a) * 23, O.y + 78 + Math.sin(a) * 23); } }, 1.2);
+  text('音量', O.x + 60, O.y + 30, 14, GREY); text('调谐', O.x + 150, O.y + 30, 14, GREY);
+  if (wired) [0, 1, 2].forEach(i => sk(() => { ctx.beginPath(); ctx.arc(O.x - 222, O.y - 10, 16 + i * 12, 2.3, 3.98); }, 1.6, AMBER)); // it sounds again
+}
+function radioBack() {
+  radioBody();
+  if (!has('panel')) { sk(() => rr(O.x - 198, O.y - 118, 396, 208, 10)); for (let i = 0; i < 8; i++) sk(() => rr(O.x - 150, O.y - 76 + i * 18, 300, 6, 3), 1.2);
+    [[-180, -100], [180, -100], [-180, 72], [180, 72]].forEach(p => { sk(() => circ(O.x + p[0], O.y + p[1], 10), 1.6); sk(() => { ctx.beginPath(); ctx.moveTo(O.x + p[0] - 6, O.y + p[1] - 6); ctx.lineTo(O.x + p[0] + 6, O.y + p[1] + 6); }, 1.6); });
+    return; }
+  hatch(() => rr(O.x - 198, O.y - 118, 396, 208, 10), 0.75); sk(() => rr(O.x - 198, O.y - 118, 396, 208, 10));
+  wash(() => circ(O.x - 110, O.y - 30, 66), SHEET); sk(() => circ(O.x - 110, O.y - 30, 66)); sk(() => circ(O.x - 110, O.y - 30, 32), 1.6); hatch(() => circ(O.x - 110, O.y - 30, 14), 1);
+  wash(() => rr(O.x + 20, O.y - 104, 160, 110, 6), SHEET); sk(() => rr(O.x + 20, O.y - 104, 160, 110, 6)); [[40, -84], [90, -70], [150, -88], [60, -34], [140, -40]].forEach(p => sk(() => rr(O.x + p[0], O.y + p[1], 22, 12, 3), 1.3));
+  wash(() => rr(O.x + 20, O.y + 22, 172, 62, 8), SHEET); sk(() => rr(O.x + 20, O.y + 22, 172, 62, 8)); sk(() => rr(O.x + 30, O.y + 30, 70, 20, 5), 1.4); sk(() => rr(O.x + 30, O.y + 56, 70, 20, 5), 1.4);
+  ctx.save(); ctx.translate(O.x + 150, O.y + 68); ctx.rotate(0.1); wash(() => rr(-38, -24, 76, 48, 3), '#fff'); sk(() => rr(-38, -24, 76, 48, 3), 1.4); text('七点半', 0, -9, 15, INK); text('县广播', 0, 10, 15, INK); ctx.restore();
+  const wired = state.choice === 'a' && state.item === 1;
+  sk(() => { ctx.beginPath(); ctx.moveTo(O.x + 40, O.y + 6); ctx.bezierCurveTo(O.x + 10, O.y + 70, O.x - 30, O.y + 80, O.x - (wired ? 70 : 58), O.y + 64); }, 2.6);
+  sk(() => { ctx.beginPath(); ctx.moveTo(O.x - 110, O.y + 36); ctx.quadraticCurveTo(O.x - 108, O.y + 60, O.x - (wired ? 70 : 84), O.y + 60); }, 2.6);
+  if (!wired) sk(() => { ctx.beginPath(); [-5, 0, 5].forEach(d => { ctx.moveTo(O.x - 58, O.y + 64); ctx.lineTo(O.x - 66, O.y + 64 + d); ctx.moveTo(O.x - 84, O.y + 60); ctx.lineTo(O.x - 76, O.y + 60 + d); }); }, 1.1);
+}
+function drawItem() {
+  const it = item(), c = state.choice;
+  if (it.id === 'watch') state.side === 'front' ? watchFront(c === 'a') : watchBack(); else state.side === 'front' ? radioFront(c === 'a') : radioBack();
+}
+function person(who, x, y, s = 1) {
+  ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+  if (who === '周奶奶') { // a bun, a padded jacket, round shoulders
+    const body = () => { ctx.beginPath(); ctx.moveTo(-46, 60); ctx.quadraticCurveTo(-44, 10, 0, 8); ctx.quadraticCurveTo(44, 10, 46, 60); };
+    hatch(body, 0.6); sk(body); wash(() => circ(0, -14, 26), SHEET); sk(() => circ(0, -14, 26)); sk(() => circ(0, -46, 11), 1.8);
+    sk(() => { ctx.beginPath(); ctx.arc(0, -20, 27, 3.3, 6.1); }, 2.6);
+    sk(() => { ctx.beginPath(); ctx.arc(-9, -12, 4, 3.4, 6); ctx.moveTo(13, -12); ctx.arc(9, -12, 4, 0, 0.1); ctx.moveTo(5, -13); ctx.arc(9, -12, 4, 3.4, 6); }, 1.5);
+    sk(() => { ctx.beginPath(); ctx.arc(0, -4, 7, 0.4, 2.7); }, 1.5); sk(() => { ctx.beginPath(); ctx.moveTo(0, 10); ctx.lineTo(0, 60); }, 1.4);
+  } else { // a flat cap, a work jacket, square shoulders
+    const body = () => { ctx.beginPath(); ctx.moveTo(-52, 60); ctx.lineTo(-48, 14); ctx.lineTo(-14, 6); ctx.lineTo(14, 6); ctx.lineTo(48, 14); ctx.lineTo(52, 60); };
+    hatch(body, 0.6); sk(body); wash(() => rr(-22, -40, 44, 50, 16), SHEET); sk(() => rr(-22, -40, 44, 50, 16));
+    const cap = () => { ctx.beginPath(); ctx.moveTo(-26, -30); ctx.quadraticCurveTo(0, -58, 26, -30); ctx.lineTo(40, -26); ctx.lineTo(26, -24); ctx.closePath(); };
+    wash(cap, PAPER); hatch(cap, 1); sk(cap); wash(() => circ(-9, -14, 2.4), INK); wash(() => circ(9, -14, 2.4), INK);
+    sk(() => { ctx.beginPath(); ctx.moveTo(-7, 0); ctx.lineTo(8, -1); }, 1.5); sk(() => { ctx.beginPath(); ctx.moveTo(-14, 6); ctx.lineTo(0, 26); ctx.lineTo(14, 6); }, 1.5);
+  }
+  ctx.restore();
+}
+function paper() {
+  ctx.fillStyle = PAPER; ctx.fillRect(0, 0, W, H);
+  ctx.save(); ctx.globalAlpha = 0.16; ctx.fillStyle = HATCH; ctx.fillRect(0, 0, W, 16); ctx.fillRect(0, H - 16, W, 16); ctx.restore();
+}
+function panel(r, title) { wash(() => rr(r.x, r.y, r.w, r.h, 10), SHEET); sk(() => rr(r.x, r.y, r.w, r.h, 10), 1.8); if (title) text(title, r.x + 20, r.y + 24, 18, GREY, 'left'); }
+function cursor() { const hot = scene === 'play' && state.phase === 'look' && spotAt(mouse.x, mouse.y);
+  if (hot) sk(() => circ(mouse.x, mouse.y, 16), 2, AMBER); // a loupe where there is something to look at
+  wash(() => circ(mouse.x, mouse.y, 4.5), INK); if (state.sel) { ctx.font = ` 19px ${FONT}`; const w = ctx.measureText(state.sel).width + 26; drawChip({ f: state.sel, x: mouse.x + 12, y: mouse.y + 10, w, h: 36 }, true, false, 0); } }
+
+// ---- Scenes ---------------------------------------------------------------------------------------
+const advance = () => pressed('Enter') || mouse.clicked;
+const sentL = () => layoutSentence(item().parts, state.fills, SHEETR.x + 24, SHEETR.y + 76, SHEETR.w - 70, 22, 46);
+const trayL = () => chipRects(state.frags, TRAY.x + 18, TRAY.y + 46, TRAY.w - 36);
+const scenes = {
+  figures: {
+    update(dt) { state.t += dt; },
+    draw() { skN = 0; paper(); state.mini = false;
+      person('周奶奶', 110, 560, 1.3); text('周奶奶', 110, 672, 20, INK); person('小陈', 290, 560, 1.3); text('小陈', 290, 672, 20, INK);
+      const keep = [state.item, state.side]; state.mini = true;
+      ctx.save(); ctx.translate(40, 60); ctx.scale(0.7, 0.7); state.item = 0; watchFront(false); ctx.restore();
+      ctx.save(); ctx.translate(480, 90); ctx.scale(0.7, 0.7); state.item = 1; radioFront(false); ctx.restore(); state.mini = false; [state.item, state.side] = keep;
+      text('手表', 275, 440, 20, INK); text('收音机', 715, 440, 20, INK);
+      chipRects(['7点40分', '厂门口', '手电筒'], 470, 560, 600).forEach((c, i) => drawChip(c, i === 1, false, 0)); text('记忆的词', 620, 630, 20, INK);
+    },
+  },
+  title: {
+    update(dt) { state.t += dt; if (advance() || pressed('Space')) { reset(); scene = 'play'; sfx.pick(); } },
+    draw() { skN = 0; paper();
+      state.mini = true; ctx.save(); ctx.globalAlpha = 0.5; ctx.translate(820, 210); ctx.scale(0.9, 0.9); watchFront(false); ctx.restore(); state.mini = false;
+      text(TITLE, 420, 200, 66, INK); text('看懂一件旧物，拼出一段记忆', 420, 270, 24, AMBER);
+      CONTROLS.forEach((c, i) => text(c, 80, 370 + i * 46, 21, INK, 'left'));
+      text('点一下，或按回车，开张', 420, 590, 26, INK); sk(() => { ctx.beginPath(); ctx.moveTo(250, 614); ctx.lineTo(590, 614); }, 1.6, AMBER); cursor();
+    },
+  },
+  play: {
+    update(dt) {
+      state.t += dt; state.phaseT += dt; state.capT = Math.max(0, state.capT - dt); state.reveal = Math.max(0, state.reveal - dt);
+      for (const k in state.pop) state.pop[k] = Math.max(0, state.pop[k] - dt * 1.1);
+      const it = item(), c = mouse.clicked, mx = mouse.x, my = mouse.y;
+      if (state.phase === 'arrive') { if (advance()) { sfx.talk(); if (++state.line >= it.arrive.length) { state.phase = 'look'; state.phaseT = 0; caption('点旧物上的地方，细看。'); } else state.say = it.arrive[state.line]; } return; }
+      if (state.phase === 'look') {
+        if (pressed('KeyF') || (c && inside(FLIP, mx, my))) { state.side = state.side === 'front' ? 'back' : 'front'; sfx.pick(); return; }
+        if (pressed('KeyH') || (c && inside(HINT, mx, my))) { hint(); return; }
+        if (!c) return;
+        const chip = trayL().find(r => inside(r, mx, my)); if (chip) { state.sel = state.sel === chip.f ? null : chip.f; sfx.pick(); return; }
+        const blank = sentL().find(t => t.blank != null && inside(t, mx, my));
+        if (blank) { if (state.sel) { state.fills[blank.blank] = state.sel; state.sel = null; sfx.place(); checkFills(); } else if (blank.text) { state.fills[blank.blank] = null; state.wrongN = -1; sfx.pick(); } else caption('先从下面拿起一个词。'); return; }
+        if (inside(WHO, mx, my)) { if (state.sel) { show(state.sel); state.sel = null; } else { state.say = '看出什么了？拿给我看看。'; sfx.talk(); } return; }
+        if (mx < 660 && my < 500) { const s = spotAt(mx, my); if (s) examine(s); else if (Math.hypot(mx - O.x, my - O.y) < 240) caption('这里没什么特别的。'); state.sel = null; }
+        return;
+      }
+      if (state.phase === 'solved') { if (state.phaseT > tune.solve_pause) { state.phase = 'choice'; state.phaseT = 0; state.side = it.id === 'radio' ? 'back' : 'front'; } return; }
+      if (state.phase === 'choice') {
+        let ch = ''; if (pressed('Digit1') || (c && inside(CH_A, mx, my))) ch = 'a'; if (pressed('Digit2') || (c && inside(CH_B, mx, my))) ch = 'b';
+        if (ch) { state.choice = ch; state.phase = 'return'; state.line = 0; state.phaseT = 0; state.say = it.back[ch][0]; state.side = it.id === 'radio' && ch === 'a' ? 'front' : state.side; sfx.solved(); events.push({ choice: it.id + ':' + ch }); }
+        return;
+      }
+      if (state.phase === 'return') {
+        if (state.phaseT > 0.3 && advance()) { sfx.talk(); state.phaseT = 0;
+          if (++state.line >= it.back[state.choice].length) { state.shelf.push({ item: state.item, choice: state.choice });
+            if (state.item + 1 < ITEMS.length) startItem(state.item + 1); else { scene = 'results'; state.phaseT = 0; state.sel = null; }
+          } else state.say = it.back[state.choice][state.line]; }
+      }
+    },
+    draw() { skN = 0; paper();
+      const it = item(), solved = ['solved', 'choice', 'return'].includes(state.phase);
+      text(it.name, 30, 40, 26, INK, 'left'); text(`${it.owner}的 · ${state.side === 'front' ? '正面' : '背面'}`, 30, 74, 17, GREY, 'left');
+      drawItem();
+      const showAll = state.phase === 'look' && (down.has('Space') || state.reveal > 0);
+      spotsOpen().forEach(s => { if (s.opens && has(s.id)) return; const x = O.x + s.x, y = O.y + s.y;
+        if (has(s.id)) { wash(() => circ(x + s.r * 0.7, y - s.r * 0.7, 5), AMBER); }
+        else if (showAll) { ctx.setLineDash([7, 7]); sk(() => circ(x, y, s.r), 2, AMBER); ctx.setLineDash([]); } });
+      if (state.phase === 'look') { button(FLIP, '翻面  F'); button(HINT, '提示  H'); text(`细看过 ${state.found.length} / ${it.spots.length}`, 300, 526, 17, GREY, 'left'); }
+      panel(CAP); if (state.cap) para(state.cap, CAP.x + 22, CAP.y + 34, CAP.w - 44, 20, state.capT > 0 ? INK : GREY, 1.5);
+      panel(SHEETR, solved ? '记忆 · 完整了' : '记忆'); drawSentence(sentL(), 22, solved);
+      panel(TRAY, '词  （点一个拿起来）'); const ans = answers(it);
+      trayL().forEach(r => drawChip(r, state.sel === r.f, state.fills.includes(r.f), state.pop[r.f] || 0));
+      if (!state.frags.length) text('还没有词。细看旧物，会看出一些。', TRAY.x + 20, TRAY.y + 70, 18, GREY, 'left');
+      panel(WHO); ctx.save(); rr(WHO.x, WHO.y, 130, WHO.h, 10); ctx.clip(); person(it.owner, WHO.x + 66, WHO.y + 84, 1.05); ctx.restore();
+      text(it.owner, WHO.x + 146, WHO.y + 26, 18, AMBER, 'left'); para(state.say, WHO.x + 146, WHO.y + 62, WHO.w - 168, 21, INK, 1.5);
+      if (state.phase === 'arrive' || state.phase === 'return') text('点一下继续', WHO.x + WHO.w - 16, WHO.y + WHO.h - 18, 15, GREY, 'right');
+      else if (state.phase === 'look' && state.sel) text('点我：把这个词给我看', WHO.x + WHO.w - 16, WHO.y + WHO.h - 18, 15, AMBER, 'right');
+      if (state.phase === 'choice') { wash(() => rr(CAP.x, CAP.y, CAP.w, CAP.h, 10), SHEET); sk(() => rr(CAP.x, CAP.y, CAP.w, CAP.h, 10), 1.8);
+        text(it.choice.ask, CAP.x + CAP.w / 2, CAP.y + 30, 20, INK); button(CH_A, '1  ' + it.choice.a); button(CH_B, '2  ' + it.choice.b); }
+      text(muted ? 'M 开声音' : 'M 静音', 30, 708, 14, GREY, 'left'); cursor();
+    },
+  },
+  results: { // the shelf: both memories, and the last question
+    update(dt) { state.t += dt; state.phaseT += dt;
+      if (pressed('KeyR')) { reset(); scene = 'play'; return; }
+      if (state.linkDone || !mouse.clicked) return;
+      const c = chipRects(LINK.opts, 520, 560, 500).find(r => inside(r, mouse.x, mouse.y)); if (!c) return;
+      if (c.f === '老周') { state.linkDone = true; state.linkMsg = LINK.end; state.gained = '两段记忆，同一场雪'; state.phaseT = 0; sfx.solved(); events.push({ link: 1 }); } else { state.linkMsg = LINK.wrong[c.f]; sfx.no(); }
+    },
+    draw() { skN = 0; paper(); text('店里留下的记忆', W / 2, 44, 30, INK);
+      const keep = [state.item, state.side, state.choice];
+      state.shelf.forEach((sh, i) => { const it = ITEMS[sh.item], r = { x: 50 + i * 600, y: 80, w: 580, h: 380 }; panel(r);
+        state.item = sh.item; state.side = 'front'; state.choice = sh.choice; state.mini = true;
+        ctx.save(); ctx.translate(r.x + 100 - O.x * 0.3, r.y + 86 - O.y * 0.3); ctx.scale(0.3, 0.3); sh.item === 0 ? watchFront(sh.choice === 'a') : radioFront(sh.choice === 'a'); ctx.restore(); state.mini = false;
+        text(it.owner, r.x + 200, r.y + 60, 22, INK, 'left'); text(it.kept[sh.choice], r.x + 200, r.y + 96, 18, GREY, 'left');
+        drawSentence(layoutSentence(it.parts, answers(it), r.x + 24, r.y + 190, r.w - 48, 20, 42, 40), 20, true); });
+      [state.item, state.side, state.choice] = keep;
+      if (state.linkDone) { const a = Math.min(1, state.phaseT / 1.5); ctx.setLineDash([4, 9]); sk(() => { ctx.beginPath(); for (let k = 0; k <= 30 * a; k++) { const u = k / 30, x = 340 + u * 600, y = 470 + Math.sin(u * 3.1416) * 26; k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); } }, 3, AMBER); ctx.setLineDash([]); }
+      drawSentence(layoutSentence(LINK.ask, [state.linkDone ? '老周' : null], 300, 530, 760, 22, 44), 22, state.linkDone);
+      if (!state.linkDone) chipRects(LINK.opts, 520, 560, 500).forEach(c => drawChip(c, false, false, 0));
+      if (state.linkMsg) para(state.linkMsg, W / 2, state.linkDone ? 590 : 630, 900, state.linkDone ? 24 : 19, state.linkDone ? '#6b3a06' : INK, 1.5, 'center');
+      text(state.linkDone ? 'R 重新开张' : '点一个名字', W / 2, 690, 18, GREY); cursor();
+    },
+  },
+};
+
+// ---- Loop: fixed step, frame time clamped ---------------------------------------------
+function step() {
+  if (pressed('KeyM')) { setMuted(!muted); hit.delete('KeyM'); }
+  scenes[scene].update(STEP); hit.clear(); mouse.clicked = false;
+}
+let last, acc = 0, ALPHA = 1;
+function tick() {
+  const now = clock.now();
+  acc += Math.min(now - last, 0.25); last = now;
+  while (acc >= STEP) { step(); acc -= STEP; }
+  ALPHA = acc / STEP;
+  drawFrame();
+}
+function drawFrame() { scenes[scene].draw(); }
+function frame() { tick(); requestAnimationFrame(frame); }
+function timer() { if (document.visibilityState === 'visible' && clock.now() - last > 0.1) tick(); }
+
+// ---- What a check can read and drive (?manual=1 stops the loop; players never see it) ----
+window.game = {
+  get scene() { return scene; },
+  get state() { return state; },
+  press(code) { hit.add(code); },
+  hold(code, on) { on ? down.add(code) : down.delete(code); },
+  get events() { return events; },
+  step(n = 1, draw = true, alpha = 1) {
+    for (let i = 0; i < n; i++) step();
+    if (draw) { ALPHA = alpha; drawFrame(); }
+  },
+};
+
+reset();
+scene = params.get('scene') || 'title';
+last = clock.now();
+if (params.get('manual') === '1') drawFrame();
+else { requestAnimationFrame(frame); setInterval(timer, 50); }
+</script>
+</body>
+</html>
