@@ -1,0 +1,2 @@
+Source: https://github.com/jarrodmedrano/jarrod-claude-skills (.claude/skills/game-design-theory)
+License: MIT, per that repository's package.json.
