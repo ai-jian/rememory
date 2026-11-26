@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>旧物铺 · 两版试玩</title>
+<meta name="description" content="一家修旧物的小铺。两个试玩版本，同一个故事，两种玩法。">
+<style>
+  :root { --paper: #efe7d6; --ink: #2f2620; --soft: #6f6558; --amber: #b86a12; --card: #f8f3e7; --line: #d6c9ae; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); line-height: 1.7;
+    font-family: "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", "STSong", "SimSun", "PingFang SC", "Microsoft YaHei", serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 48px 16px 64px; }
+  h1 { font-size: clamp(32px, 6vw, 52px); margin: 0 0 8px; font-weight: 600; letter-spacing: 0.04em; }
+  .lead { font-size: 19px; color: var(--soft); margin: 0 0 36px; max-width: 34em; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; }
+  .card { background: var(--card); border: 1.5px solid var(--line); border-radius: 14px; overflow: hidden; display: flex; flex-direction: column; }
+  .card img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; border-bottom: 1.5px solid var(--line); }
+  .body { padding: 20px 22px 24px; display: flex; flex-direction: column; gap: 10px; flex: 1; }
+  h2 { font-size: 26px; margin: 0; font-weight: 600; }
+  .tag { color: var(--amber); font-size: 16px; margin: 0; }
+  .body p { margin: 0; font-size: 17px; }
+  .keys { color: var(--soft); font-size: 15px; }
+  a.play { margin-top: auto; align-self: flex-start; background: var(--ink); color: var(--card); text-decoration: none;
+    font-size: 19px; padding: 10px 26px; border-radius: 999px; }
+  a.play:hover, a.play:focus-visible { background: var(--amber); outline: none; }
+  .note { margin-top: 36px; padding: 18px 22px; border-left: 4px solid var(--amber); background: var(--card); border-radius: 0 10px 10px 0; font-size: 17px; }
+  .note p { margin: 0 0 6px; } .note p:last-child { margin: 0; }
+  footer { margin-top: 32px; color: var(--soft); font-size: 15px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>旧物铺</h1>
+  <p class="lead">一家修旧物的小铺。客人带着旧东西来，每一件都藏着一段记忆。这里有两个试玩版本：同一个故事，两种玩法。每版大约 6 到 10 分钟。</p>
+
+  <div class="grid">
+    <section class="card">
+      <img src="play/warm-shot.png" alt="暖灯版的画面：暖色工作台上的一块手表，右边是慢慢亮起来的记忆画面" width="1280" height="720">
+      <div class="body">
+        <h2>暖灯</h2>
+        <p class="tag">亲手修，记忆自己浮出来</p>
+        <p>拿起工具，在旧物上擦、撬、接线、调台。每修一步，就露出一条线索。</p>
+        <p class="keys">点工具，在旧物上按住拖动。也可以按住空格让工具自己干活。</p>
+        <a class="play" href="play/warm/">开始玩</a>
+      </div>
+    </section>
+
+    <section class="card">
+      <img src="play/sketch-shot.png" alt="拼忆版的画面：铅笔线稿的手表，右边是一段有空格的记忆和一排可以填进去的词" width="1280" height="720">
+      <div class="body">
+        <h2>拼忆</h2>
+        <p class="tag">看懂旧物，自己把记忆拼出来</p>
+        <p>细看旧物，得到一些词。把词拿给客人看，再填进一段有空格的记忆里。</p>
+        <p class="keys">全用鼠标点。按住空格可以看到哪里能细看。</p>
+        <a class="play" href="play/sketch/">开始玩</a>
+      </div>
+    </section>
+  </div>
+
+  <div class="note">
+    <p>用电脑玩最合适，有声音。按 M 可以静音，按 H 有提示。</p>
+    <p>玩完想听你说：哪一版更让你在意物主的故事？最好的一刻和最差的一刻是什么？</p>
+  </div>
+
+  <footer>这是早期试玩，还很粗糙。</footer>
+</main>
+</body>
+</html>

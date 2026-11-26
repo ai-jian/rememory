@@ -1,0 +1,666 @@
+<!doctype html>
+<!-- PROTOTYPE - NOT FOR PRODUCTION -->
+<!-- Question: 记忆是修出来的这个玩法成立吗？亲手修的手感能不能让人在意物主的故事？ -->
+<!-- Date: 2026-11-26 -->
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>旧物铺 · 暖灯</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  body { font-variant-numeric: tabular-nums; }
+  canvas { display: block; margin: 0 auto; cursor: none; touch-action: none; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script src="config.js"></script>
+<script>
+'use strict';
+// ---- Built to be checked ----------------------------------------------------------------
+const params = new URLSearchParams(location.search);
+const tune = new Proxy({}, { get: (_, k) => CONFIG[k].value }); // live: tune.speed is CONFIG.speed.value
+const STEP = 1 / 60;            // simulation step in seconds; motion is per second, never per frame
+const W = 1280, H = 720;        // logical size
+const PIXEL = false;
+const FONT = '"Noto Serif CJK SC","Source Han Serif SC","Songti SC","STSong","SimSun","Noto Sans CJK SC","PingFang SC","Microsoft YaHei",serif';
+const TITLE = '旧物铺 · 暖灯';
+const CONTROLS = ['鼠标：点工具拿起，在旧物上按住拖动来干活', '空格：按住，让手里的工具自己干活', '1-4 换工具   F 翻面   H 提示   M 静音'];
+const clock = window.GAME_CLOCK || { now: () => performance.now() / 1000 }; // a check may inject one
+const CHEAP = params.get('render') === 'cheap';
+let seed;
+function rng() { // mulberry32; every gameplay random call reads this, never Math.random
+  seed = (seed + 0x6D2B79F5) | 0;
+  let t = Math.imul(seed ^ (seed >>> 15), seed | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+const events = []; // window.game.events: anything the game wants a run to see
+
+// ---- Screen ---------------------------------------------------------------------------
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+function fit() {
+  const k = Math.min(innerWidth / W, innerHeight / H);
+  const s = PIXEL ? Math.max(1, Math.floor(k)) : k;
+  const r = PIXEL ? 1 : s * (devicePixelRatio || 1);
+  canvas.width = Math.round(W * r); canvas.height = Math.round(H * r);
+  canvas.style.width = Math.round(W * s) + 'px'; canvas.style.height = Math.round(H * s) + 'px';
+  canvas.style.marginTop = Math.max(0, Math.floor((innerHeight - H * s) / 2)) + 'px';
+  ctx.setTransform(r, 0, 0, r, 0, 0);
+}
+addEventListener('resize', fit); fit();
+function text(s, x, y, size, c, align = 'center', weight = '') {
+  if (state && state.mini && size < 30) return; // a shrunk object on the shelf drops its small print
+  ctx.fillStyle = c; ctx.font = `${weight} ${size}px ${FONT}`; ctx.textAlign = align;
+  ctx.textBaseline = 'middle'; ctx.fillText(s, x, y);
+}
+function wrap(s, maxW, size) { // Chinese wraps by character
+  ctx.font = ` ${size}px ${FONT}`; const lines = []; let cur = '';
+  for (const ch of s) {
+    if (ch === '\n') { lines.push(cur); cur = ''; continue; }
+    if (ctx.measureText(cur + ch).width > maxW && cur && !'，。！？；：、”’）…'.includes(ch)) { lines.push(cur); cur = ch; } else cur += ch;
+  }
+  if (cur) lines.push(cur); return lines;
+}
+function para(s, x, y, maxW, size, c, lh = 1.5, align = 'left') {
+  const ls = wrap(s, maxW, size); ls.forEach((l, i) => text(l, x, y + i * size * lh, size, c, align)); return ls.length * size * lh;
+}
+function rr(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); }
+function circ(x, y, r) { ctx.beginPath(); ctx.arc(x, y, r, 0, 7); }
+
+// ---- Input ----------------------------------------------------------------------------
+const down = new Set(), hit = new Set();
+const pressed = code => hit.has(code);
+addEventListener('keydown', e => {
+  startAudio();
+  if (!e.repeat) { down.add(e.code); hit.add(e.code); }
+  if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
+});
+addEventListener('keyup', e => down.delete(e.code));
+addEventListener('blur', () => { down.clear(); mouse.down = false; });
+const mouse = { x: W / 2, y: H / 2, down: false, clicked: false, moved: 0, dx: 0, dy: 0 };
+function toLogical(e) { const r = canvas.getBoundingClientRect(); return [(e.clientX - r.left) / r.width * W, (e.clientY - r.top) / r.height * H]; }
+addEventListener('pointermove', e => { const [x, y] = toLogical(e); mouse.dx += x - mouse.x; mouse.dy += y - mouse.y; mouse.moved += Math.hypot(x - mouse.x, y - mouse.y); mouse.x = x; mouse.y = y; });
+addEventListener('pointerdown', e => { startAudio(); const [x, y] = toLogical(e); mouse.x = x; mouse.y = y; mouse.down = true; mouse.clicked = true; });
+addEventListener('pointerup', () => { mouse.down = false; });
+
+// ---- Audio ----------------------------------------------------------------------------
+let audio = null, muted = false;
+function startAudio() {
+  if (!audio) {
+    const ac = window.GAME_AUDIO || new (window.AudioContext || window.webkitAudioContext)();
+    const out = ac.createGain(); out.gain.value = muted ? 0 : tune.volume;
+    out.connect(ac.destination); audio = { ac, out };
+  }
+  if (audio.ac.state === 'suspended') audio.ac.resume();
+}
+function setMuted(m) { muted = m; if (audio) audio.out.gain.value = m ? 0 : tune.volume; }
+addEventListener('tune', () => setMuted(muted));
+function tone(freq, dur, type = 'sine', vol = 0.2, delay = 0) {
+  if (!audio || muted) return;
+  const t = audio.ac.currentTime + delay, o = audio.ac.createOscillator(), g = audio.ac.createGain();
+  o.type = type; o.frequency.value = freq;
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  o.connect(g).connect(audio.out); o.start(t); o.stop(t + dur);
+}
+const sfx = {
+  scrub(p) { tone(180 + p * 500 + rng() * 60, 0.05, 'triangle', 0.05); }, // the pitch rises as the surface comes clean
+  step() { tone(660, 0.25, 'sine', 0.18); tone(990, 0.4, 'sine', 0.14, 0.12); },
+  done() { [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.6, 'sine', 0.16, i * 0.14)); },
+  tick() { tone(2400, 0.02, 'square', 0.05); },
+  click() { tone(420, 0.05, 'triangle', 0.12); },
+  no() { tone(150, 0.12, 'triangle', 0.1); },
+  bell() { tone(1568, 0.5, 'sine', 0.14); tone(1976, 0.7, 'sine', 0.1, 0.16); }, // the shop door
+  hiss(a) { tone(800 + rng() * 2400, 0.04, 'sawtooth', 0.02 * a); },
+};
+
+// ---- The story: two objects, one snowy night ---------------------------------------------
+const C = { x: 560, y: 352 }; // the middle of the felt mat
+const PAL = { wood: '#8a5a3c', woodDark: '#5a3a2a', felt: '#4f6b5c', feltDark: '#3f574b', brass: '#c9a45c', brassDark: '#8a6b3a',
+  cream: '#f6efdc', ink: '#3b2c22', red: '#b5483a', amber: '#f2b04a', paper: '#efe3c6', steel: '#cfd3d6', grime: '#7d745f' };
+const TOOLS = [
+  { id: 'cloth', name: '绒布', key: 'Digit1' }, { id: 'driver', name: '螺丝刀', key: 'Digit2' },
+  { id: 'iron', name: '烙铁', key: 'Digit3' }, { id: 'hand', name: '手', key: 'Digit4' },
+];
+const ITEMS = [
+  { id: 'watch', name: '一块停掉的手表', owner: '周奶奶', glow: true,
+    arrive: ['它停了很多年了。', '老周一直不让修。……他今年春天走了。'],
+    steps: [
+      { id: 'wipe', tool: 'cloth', side: 'front', needs: [], clue: '表蒙有一道裂痕。指针停在 7 点 40 分。', hint1: '表蒙上蒙着一层灰，看不清指针。', hint2: '拿起绒布（1），在表蒙上按住来回擦。' },
+      { id: 'pry', tool: 'driver', side: 'back', needs: [], clue: '后盖里刻着"1987.12.24 兰"。机芯里有干掉的水渍，还卡着一粒砂。', hint1: '表的背面还没看过。', hint2: '按 F 翻面，拿螺丝刀（2），沿后盖的边缘按住划一圈，把它撬开。' },
+      { id: 'wind', tool: 'hand', side: 'front', needs: ['pry'], blocked: '发条拧不动，像是里面卡着什么。', clue: '砂粒掉出来以后，发条还能上。秒针走起来了。', hint1: '表冠在右边，它是用来上发条的。', hint2: '翻回正面，用手（4）按住右边的表冠，拧一会儿。' },
+    ],
+    choice: { ask: '表蒙上那道裂痕，怎么办？', a: '换一片新表蒙', b: '留着这道裂痕' },
+    memory: '1987 年 12 月 24 日，小城下了几十年最大的一场雪，纺织厂的班车停了。老周走了十几里雪路，去接下夜班的秀兰，在厂门口摔了一跤。表进了雪水，停在 7 点 40 分，正是他走到的时候。',
+    back: { a: ['真亮，跟他刚戴上那天一样。', '……就是那道印子，我刚才找了一下。'], b: ['这道印子还在。', '那天他摔了一跤，爬起来还冲我笑。……谢谢你。'] },
+    kept: { a: '表蒙换成了新的', b: '裂痕留下了' } },
+  { id: 'radio', name: '一台半导体收音机', owner: '小陈', glow: false,
+    arrive: ['我爸的收音机。他以前开厂里的班车。', '我妈说，修不好也没关系，就是想再听一听。'],
+    steps: [
+      { id: 'dust', tool: 'cloth', side: 'front', needs: [], clue: '有一个旋钮不是原装的，是牙膏盖做的。', hint1: '机身上一层灰，旋钮都看不清了。', hint2: '拿起绒布（1），在收音机正面按住来回擦。' },
+      { id: 'open', tool: 'driver', side: 'back', needs: [], clue: '电池仓里夹着一张纸条，是女人的字：七点半，县广播，1035。', hint1: '背面有四颗螺丝。', hint2: '按 F 翻面，拿螺丝刀（2），在每颗螺丝上按住，直到它松开。' },
+      { id: 'solder', tool: 'iron', side: 'back', needs: ['open'], blocked: '后盖还盖着，够不着里面。', clue: '喇叭线是被扯断的。接上了。', hint1: '里面有一根线没有连到喇叭上。', hint2: '拿烙铁（3），按住喇叭旁边那根断开的线头。另一个焊点是好的。' },
+      { id: 'tune', tool: 'hand', side: 'front', needs: ['solder'], blocked: '旋钮能转，可是没有声音。喇叭是哑的。', clue: '广播："……受大雪影响，纺织厂夜班班车今晚停运。司机陈德山同志已步行护送工人回城，请家属放心……"', hint1: '纸条上写着一个数字。', hint2: '翻回正面，用手（4）按住右下的旋钮左右拖，把指针对到 1035。' },
+    ],
+    choice: { ask: '那个牙膏盖做的旋钮，怎么办？', a: '换一个新旋钮', b: '留着牙膏盖' },
+    memory: '那天晚上班车开不动了。陈德山把车停在半路，领着一车女工走回城里。他的妻子和六岁的儿子守着这台收音机，等县广播念出他的名字。旋钮是那晚被孩子拧掉的，妈妈拿牙膏盖补上了。',
+    back: { a: ['像新的一样。', '……那个牙膏盖，我能带走吗？'], b: ['我妈补的。', '她要是看见还在，肯定要笑。……我爸说过，那晚路上遇见一个往厂里走的人，他把手电筒给了人家。'] },
+    kept: { a: '旋钮换成了新的', b: '牙膏盖留下了' } },
+];
+const LINK = '同一场雪。送工人回城的司机，把手电筒给了一个往厂里走的男人。那个人是去接妻子下夜班的。';
+
+// ---- State ------------------------------------------------------------------------------
+let scene, state;
+function makeGrid(cols, rows) { return { cols, rows, a: new Array(cols * rows).fill(1) }; }
+function startItem(i) {
+  const it = ITEMS[i];
+  state.item = i; state.phase = 'arrive'; state.line = 0; state.side = 'front'; state.tool = null;
+  state.done = []; state.clues = []; state.msg = ''; state.msgT = 0; state.hint = 0; state.hintStep = '';
+  state.prog = {}; it.steps.forEach(s => state.prog[s.id] = 0);
+  state.grid = it.id === 'watch' ? makeGrid(12, 12) : makeGrid(16, 10);
+  sfx.bell(); state.screws = [0, 0, 0, 0]; state.freq = 600; state.onStation = 0; state.choice = ''; state.phaseT = 0; state.pop = 0;
+}
+function reset() {
+  seed = Number(params.get('seed')) || CONFIG.seed;
+  state = { t: 0, score: 0, gained: '', shelf: [], motes: [] };
+  for (let i = 0; i < 80; i++) state.motes.push({ x: rng(), y: rng(), s: 0.4 + rng() * 0.6, p: rng() * 6.28 });
+  startItem(0);
+}
+const item = () => ITEMS[state.item];
+const stepById = id => item().steps.find(s => s.id === id);
+const isDone = id => state.done.includes(id);
+function say(m) { if (state.msg !== m || state.msgT <= 0) sfx.no(); state.msg = m; state.msgT = 3.2; }
+function nextStep() { // the first step not done whose needs are met
+  return item().steps.find(s => !isDone(s.id) && s.needs.every(isDone)) || null;
+}
+function finishStep(s) {
+  state.done.push(s.id); state.prog[s.id] = 1; state.clues.push(s.clue); state.score++; state.pop = 1; state.hint = 0; state.msgT = 0;
+  events.push({ step: s.id }); sfx.step();
+  if (state.done.length === item().steps.length) { state.phase = 'choice'; state.phaseT = 0; sfx.done(); }
+}
+
+// ---- Work: what each tool does where ------------------------------------------------------
+function gridRect() { return item().id === 'watch' ? { x: C.x - 100, y: C.y - 100, w: 200, h: 200 } : { x: C.x - 215, y: C.y - 135, w: 430, h: 270 }; }
+function scrub(px, py, dt, k = 1) {
+  const g = state.grid, r = gridRect(), cw = r.w / g.cols, ch = r.h / g.rows; let sum = 0, n = 0;
+  for (let j = 0; j < g.rows; j++) for (let i = 0; i < g.cols; i++) {
+    const cx = r.x + (i + 0.5) * cw, cy = r.y + (j + 0.5) * ch;
+    if (item().id === 'watch' && Math.hypot(cx - C.x, cy - C.y) > 100) continue;
+    const kk = j * g.cols + i;
+    if (Math.hypot(cx - px, cy - py) < tune.scrub_radius * k) g.a[kk] = Math.max(0, g.a[kk] - tune.scrub_rate * dt);
+    sum += g.a[kk]; n++;
+  }
+  return 1 - sum / n;
+}
+const SCREWS = [[-185, -105], [185, -105], [-185, 105], [185, 105]];
+const BREAK = { x: C.x - 70, y: C.y + 62 }, DECOY = { x: C.x + 120, y: C.y - 20 };
+const CROWN = { x: C.x + 138, y: C.y }, KNOB = { x: C.x + 150, y: C.y + 78 };
+function autoTarget(s, t) { // where the hand goes when Space does the work
+  const a = t * tune.auto_speed;
+  if (s.id === 'wipe') { const r = 20 + ((a * 14) % 78); return [C.x + Math.cos(a * 4) * r, C.y + Math.sin(a * 4) * r]; }
+  if (s.id === 'dust') return [C.x + Math.sin(a * 3.2) * 195, C.y - 118 + ((a * 34) % 236)];
+  if (s.id === 'pry') return [C.x + Math.cos(a * 2) * 114, C.y + Math.sin(a * 2) * 114];
+  if (s.id === 'wind') return [CROWN.x, CROWN.y + Math.sin(a * 5) * 8];
+  if (s.id === 'open') { const k = state.screws.findIndex(v => v < 1); return [C.x + SCREWS[Math.max(0, k)][0], C.y + SCREWS[Math.max(0, k)][1]]; }
+  if (s.id === 'solder') return [BREAK.x, BREAK.y];
+  return [KNOB.x, KNOB.y];
+}
+function work(px, py, moved, dx, dt, auto) {
+  const it = item(), tool = state.tool; if (!tool) return;
+  const near = (p, r) => Math.hypot(px - p.x, py - p.y) < r;
+  const cand = it.steps.filter(s => s.tool === tool && !isDone(s.id));
+  if (!cand.length) { if (auto) say('这件工具在这里已经没有活了。'); return; }
+  const s = cand[0];
+  if (s.side !== state.side) { if (auto || Math.hypot(px - C.x, py - C.y) < 150) say(s.side === 'back' ? '这一面没有它能干的活。翻过来看看（F）。' : '这一面没有它能干的活。翻回正面看看（F）。'); return; }
+  const blocked = !s.needs.every(isDone);
+  if (s.id === 'wipe' || s.id === 'dust') {
+    if (moved <= 0) return;
+    const p = scrub(px, py, dt, auto ? 1.8 : 1); if (p > state.prog[s.id] + 0.004 && (state.t * 20 | 0) % 2 === 0) sfx.scrub(p);
+    state.prog[s.id] = p;
+    if (p >= tune.auto_finish) { state.grid.a.fill(0); finishStep(s); }
+  } else if (s.id === 'pry') {
+    const d = Math.hypot(px - C.x, py - C.y);
+    if (d > 85 && d < 150 && moved > 0) { state.prog.pry = Math.min(1, state.prog.pry + moved / tune.pry_distance); if ((state.t * 12 | 0) % 2 === 0) sfx.scrub(state.prog.pry * 0.5); if (state.prog.pry >= 1) finishStep(s); }
+  } else if (s.id === 'wind') {
+    if (!near(CROWN, 44)) return;
+    if (blocked) { say(s.blocked); return; }
+    state.prog.wind = Math.min(1, state.prog.wind + dt / tune.wind_time); if ((state.t * 8 | 0) !== ((state.t - dt) * 8 | 0)) sfx.tick();
+    if (state.prog.wind >= 1) finishStep(s);
+  } else if (s.id === 'open') {
+    const k = SCREWS.findIndex((p, i) => state.screws[i] < 1 && Math.hypot(px - C.x - p[0], py - C.y - p[1]) < 30);
+    if (k < 0) return;
+    state.screws[k] = Math.min(1, state.screws[k] + dt / tune.screw_time); if (state.screws[k] >= 1) sfx.click();
+    state.prog.open = state.screws.reduce((a, b) => a + b, 0) / 4;
+    if (state.screws.every(v => v >= 1)) finishStep(s);
+  } else if (s.id === 'solder') {
+    if (blocked) { if (Math.hypot(px - C.x, py - C.y) < 240) say(s.blocked); return; }
+    if (near(DECOY, 28)) { say('这个焊点是好的，不用动它。'); return; }
+    if (!near(BREAK, 30)) return;
+    state.prog.solder = Math.min(1, state.prog.solder + dt / tune.solder_time); if ((state.t * 15 | 0) % 3 === 0) sfx.hiss(1);
+    if (state.prog.solder >= 1) finishStep(s);
+  } else if (s.id === 'tune') {
+    if (!near(KNOB, 48) && !auto) return;
+    const before = state.freq;
+    if (auto) { const d = tune.tune_target - state.freq; state.freq += Math.sign(d) * Math.min(Math.abs(d), tune.tune_auto_speed * dt); }
+    else state.freq += dx * tune.tune_rate;
+    state.freq = Math.max(540, Math.min(1600, state.freq));
+    if (blocked) { if (before !== state.freq) say(s.blocked); return; }
+  }
+}
+function tuneListen(dt) { // the radio plays whether or not the hand is on the knob
+  const s = stepById('tune'); if (!s || isDone('tune') || !isDone('solder') || state.phase !== 'work') return;
+  const d = Math.abs(state.freq - tune.tune_target);
+  if ((state.t * 30 | 0) % 2 === 0) sfx.hiss(Math.min(1, d / 200) + 0.15);
+  if (d <= tune.tune_tolerance) { state.onStation += dt; state.prog.tune = Math.min(1, state.onStation / tune.tune_hold); if (state.onStation >= tune.tune_hold) finishStep(s); }
+  else { state.onStation = 0; state.prog.tune = 0; }
+}
+
+// ---- Layout of the things you click -------------------------------------------------------
+const toolRect = i => ({ x: 34, y: 150 + i * 104, w: 150, h: 92 });
+const FLIP = { x: 34, y: 574, w: 150, h: 44 }, HINT = { x: 34, y: 626, w: 150, h: 44 };
+const CH_A = { x: C.x - 250, y: 600, w: 240, h: 56 }, CH_B = { x: C.x + 10, y: 600, w: 240, h: 56 };
+const inside = (r, x, y) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
+function flip() { state.side = state.side === 'front' ? 'back' : 'front'; sfx.click(); }
+function hint() {
+  const s = nextStep(); if (!s) return;
+  if (state.hintStep !== s.id) { state.hint = 0; state.hintStep = s.id; }
+  state.hint = Math.min(2, state.hint + 1); state.msg = state.hint === 1 ? s.hint1 : s.hint2; state.msgT = 8; sfx.click();
+}
+
+// ---- Drawing: the bench -------------------------------------------------------------------
+function bench() {
+  const g = ctx.createRadialGradient(C.x, C.y - 30, 60, C.x, C.y, 760);
+  g.addColorStop(0, '#f3d49c'); g.addColorStop(0.35, '#c98d55'); g.addColorStop(0.75, '#7a4d33'); g.addColorStop(1, '#3a2419');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = 'rgba(70,40,24,0.28)'; ctx.lineWidth = 1.5;
+  for (let y = 46; y < H; y += 62) { ctx.beginPath(); ctx.moveTo(0, y); ctx.bezierCurveTo(400, y + 6, 800, y - 6, W, y + 3); ctx.stroke(); }
+  ctx.fillStyle = 'rgba(0,0,0,0.18)'; rr(C.x - 286, C.y - 214, 580, 440, 18); ctx.fill(); // mat shadow
+  ctx.fillStyle = PAL.felt; rr(C.x - 290, C.y - 220, 580, 440, 18); ctx.fill();
+  ctx.strokeStyle = PAL.feltDark; ctx.lineWidth = 3; ctx.setLineDash([10, 8]); rr(C.x - 276, C.y - 206, 552, 412, 12); ctx.stroke(); ctx.setLineDash([]);
+  const l = ctx.createRadialGradient(C.x, C.y, 40, C.x, C.y, 330); l.addColorStop(0, 'rgba(255,236,190,0.30)'); l.addColorStop(1, 'rgba(255,236,190,0)');
+  ctx.fillStyle = l; circ(C.x, C.y, 330); ctx.fill();
+}
+function motes() { // the signature: dust drifting in the lamp light
+  const n = Math.min(state.motes.length, tune.dust_motes);
+  for (let i = 0; i < n; i++) {
+    const m = state.motes[i], x = C.x - 300 + ((m.x * 600 + state.t * 6 * m.s) % 600), y = C.y - 230 + ((m.y * 460 + Math.sin(state.t * 0.4 + m.p) * 18 + 460) % 460);
+    const d = Math.hypot(x - C.x, y - C.y); if (d > 320) continue;
+    ctx.fillStyle = `rgba(255,240,205,${0.5 * (1 - d / 320) * (0.5 + 0.5 * Math.sin(state.t + m.p))})`; circ(x, y, 1.2 + m.s * 1.4); ctx.fill();
+  }
+}
+function glowRing(x, y, r) { const a = 0.45 + 0.35 * Math.sin(state.t * 4); ctx.strokeStyle = `rgba(242,176,74,${a})`; ctx.lineWidth = 4; ctx.setLineDash([8, 7]); circ(x, y, r); ctx.stroke(); ctx.setLineDash([]); }
+
+// ---- Drawing: the watch ---------------------------------------------------------------------
+function strap(dir) {
+  ctx.fillStyle = '#6a4a36'; rr(C.x - 44, dir < 0 ? C.y - 250 : C.y + 96, 88, 154, 10); ctx.fill();
+  ctx.strokeStyle = '#4c3324'; ctx.lineWidth = 2; ctx.setLineDash([6, 5]); rr(C.x - 36, dir < 0 ? C.y - 242 : C.y + 104, 72, 138, 6); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle = '#3b2c22'; for (let i = 0; i < 3; i++) { circ(C.x, C.y + dir * (150 + i * 26), 4); if (dir > 0) ctx.fill(); }
+}
+function grime(col, k = 1) {
+  const g = state.grid, r = gridRect(), cw = r.w / g.cols, ch = r.h / g.rows;
+  for (let j = 0; j < g.rows; j++) for (let i = 0; i < g.cols; i++) {
+    const a = g.a[j * g.cols + i]; if (a <= 0) continue;
+    ctx.fillStyle = col.replace('A', (a * k * (0.78 + 0.16 * Math.sin(i * 7.3 + j * 3.1))).toFixed(3));
+    circ(r.x + (i + 0.5) * cw, r.y + (j + 0.5) * ch, cw * 0.82); ctx.fill();
+  }
+}
+function watchFront() {
+  strap(-1); strap(1);
+  const turn = state.prog.wind * 14;
+  ctx.fillStyle = PAL.brassDark; rr(CROWN.x - 16, CROWN.y - 15, 26, 30, 5); ctx.fill(); // the crown, ridged
+  ctx.strokeStyle = '#5e4826'; ctx.lineWidth = 2; for (let i = 0; i < 5; i++) { const y = CROWN.y - 15 + ((i * 6 + turn * 6) % 30); ctx.beginPath(); ctx.moveTo(CROWN.x - 14, y); ctx.lineTo(CROWN.x + 8, y); ctx.stroke(); }
+  ctx.fillStyle = PAL.brassDark; circ(C.x, C.y, 126); ctx.fill();
+  ctx.fillStyle = PAL.brass; circ(C.x, C.y, 118); ctx.fill();
+  ctx.fillStyle = PAL.cream; circ(C.x, C.y, 100); ctx.fill();
+  ctx.strokeStyle = PAL.ink; for (let i = 0; i < 12; i++) { const a = i * Math.PI / 6; ctx.lineWidth = i % 3 ? 2 : 5; ctx.beginPath(); ctx.moveTo(C.x + Math.sin(a) * 84, C.y - Math.cos(a) * 84); ctx.lineTo(C.x + Math.sin(a) * 94, C.y - Math.cos(a) * 94); ctx.stroke(); }
+  text('上海', C.x, C.y - 44, 17, '#6b5a48');
+  const run = isDone('wind') ? state.t - state.windAt : 0; // it stopped at 7:40; once wound it goes on from there
+  const mins = 460 + run / 60, hA = mins / 720 * 6.283, mA = (mins % 60) / 60 * 6.283, sA = Math.floor(run) / 60 * 6.283;
+  const hand = (a, len, w, c) => { ctx.strokeStyle = c; ctx.lineWidth = w; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(C.x - Math.sin(a) * 10, C.y + Math.cos(a) * 10); ctx.lineTo(C.x + Math.sin(a) * len, C.y - Math.cos(a) * len); ctx.stroke(); ctx.lineCap = 'butt'; };
+  hand(hA, 52, 7, PAL.ink); hand(mA, 80, 5, PAL.ink); hand(sA, 86, 2, PAL.red);
+  ctx.fillStyle = PAL.red; circ(C.x, C.y, 6); ctx.fill();
+  if (state.choice !== 'a') { ctx.strokeStyle = 'rgba(90,90,90,0.8)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(C.x - 78, C.y + 52); ctx.lineTo(C.x - 30, C.y + 18); ctx.lineTo(C.x - 36, C.y - 6); ctx.lineTo(C.x + 6, C.y - 44); ctx.stroke(); ctx.beginPath(); ctx.moveTo(C.x - 30, C.y + 18); ctx.lineTo(C.x - 8, C.y + 26); ctx.stroke(); }
+  ctx.save(); circ(C.x, C.y, 100); ctx.clip(); grime('rgba(125,116,95,A)');
+  ctx.fillStyle = 'rgba(255,255,255,0.16)'; ctx.beginPath(); ctx.ellipse(C.x - 34, C.y - 46, 46, 20, -0.6, 0, 7); ctx.fill(); ctx.restore();
+}
+function gear(x, y, r, teeth, a, c) {
+  ctx.fillStyle = c; ctx.beginPath();
+  for (let i = 0; i < teeth * 2; i++) { const rr2 = i % 2 ? r : r * 0.8, an = a + i * Math.PI / teeth; ctx.lineTo(x + Math.cos(an) * rr2, y + Math.sin(an) * rr2); }
+  ctx.closePath(); ctx.fill(); ctx.fillStyle = '#3b2c22'; circ(x, y, r * 0.2); ctx.fill();
+}
+function watchBack() {
+  strap(-1); strap(1);
+  ctx.fillStyle = PAL.brassDark; rr(C.x - 148, C.y - 15, 26, 30, 5); ctx.fill();
+  ctx.fillStyle = PAL.brassDark; circ(C.x, C.y, 126); ctx.fill();
+  if (isDone('pry')) {
+    ctx.fillStyle = '#4a4038'; circ(C.x, C.y, 112); ctx.fill();
+    const sp = isDone('wind') ? state.t - state.windAt : 0;
+    gear(C.x - 34, C.y - 26, 46, 14, sp * 0.5, '#b89a5a'); gear(C.x + 38, C.y + 8, 36, 12, -sp * 0.7 + 0.2, '#d2b672'); gear(C.x - 10, C.y + 54, 28, 10, sp, '#a88848');
+    ctx.fillStyle = 'rgba(120,150,150,0.35)'; ctx.beginPath(); ctx.ellipse(C.x + 30, C.y - 58, 44, 22, 0.4, 0, 7); ctx.fill(); // the dried water stain
+    ctx.strokeStyle = 'rgba(90,120,120,0.6)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.ellipse(C.x + 30, C.y - 58, 44, 22, 0.4, 0, 7); ctx.stroke();
+    // the lid, set down beside it, engraving up
+    const lx = C.x + 196, ly = C.y + 96;
+    ctx.fillStyle = PAL.brassDark; circ(lx, ly, 84); ctx.fill(); ctx.fillStyle = '#d8bd80'; circ(lx, ly, 76); ctx.fill();
+    ctx.strokeStyle = '#a58a52'; ctx.lineWidth = 1.5; circ(lx, ly, 66); ctx.stroke();
+    text('1987.12.24', lx, ly - 10, 20, '#5e4826'); text('兰', lx, ly + 22, 26, '#5e4826');
+    ctx.fillStyle = '#c9b48a'; circ(C.x - 150, C.y + 150, 5); ctx.fill(); text('一粒砂', C.x - 150, C.y + 174, 16, PAL.cream);
+  } else {
+    ctx.fillStyle = '#bfa064'; circ(C.x, C.y, 114); ctx.fill();
+    ctx.strokeStyle = '#8a6b3a'; ctx.lineWidth = 2; circ(C.x, C.y, 98); ctx.stroke();
+    for (let i = 0; i < 6; i++) { const a = i * 1.047; ctx.fillStyle = '#8a6b3a'; rr(C.x + Math.cos(a) * 104 - 5, C.y + Math.sin(a) * 104 - 5, 10, 10, 2); ctx.fill(); }
+    text('防水', C.x, C.y - 8, 18, '#7a6238'); text('全钢', C.x, C.y + 20, 18, '#7a6238');
+    const p = state.prog.pry; if (p > 0) { ctx.strokeStyle = '#2a1d15'; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(C.x, C.y, 115, -1.57, -1.57 + p * 6.283); ctx.stroke(); }
+  }
+}
+
+// ---- Drawing: the radio -----------------------------------------------------------------------
+function knob(x, y, cap, a) {
+  if (cap) { // the toothpaste cap: white, ridged, a little too small
+    ctx.fillStyle = '#e9e6dc'; circ(x, y, 24); ctx.fill(); ctx.strokeStyle = '#b9b4a4'; ctx.lineWidth = 2;
+    for (let i = 0; i < 14; i++) { const an = a + i * 0.449; ctx.beginPath(); ctx.moveTo(x + Math.cos(an) * 17, y + Math.sin(an) * 17); ctx.lineTo(x + Math.cos(an) * 24, y + Math.sin(an) * 24); ctx.stroke(); }
+    ctx.fillStyle = '#f7f5ee'; circ(x, y, 13); ctx.fill();
+  } else {
+    ctx.fillStyle = '#2f2823'; circ(x, y, 28); ctx.fill(); ctx.fillStyle = '#4a4038'; circ(x, y, 21); ctx.fill();
+    ctx.strokeStyle = PAL.cream; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(a) * 19, y + Math.sin(a) * 19); ctx.stroke();
+  }
+}
+function radioBody() {
+  ctx.fillStyle = 'rgba(0,0,0,0.25)'; rr(C.x - 212, C.y - 128, 430, 270, 20); ctx.fill();
+  ctx.fillStyle = '#9c3f33'; rr(C.x - 215, C.y - 135, 430, 270, 20); ctx.fill();
+  ctx.fillStyle = '#7c2f26'; rr(C.x - 215, C.y + 105, 430, 30, 12); ctx.fill();
+  ctx.fillStyle = '#c9c0a8'; rr(C.x - 60, C.y - 160, 120, 30, 8); ctx.fill(); ctx.fillStyle = '#9c3f33'; rr(C.x - 46, C.y - 152, 92, 18, 5); ctx.fill(); // handle
+}
+function radioFront() {
+  radioBody();
+  ctx.fillStyle = '#d9cdb0'; rr(C.x - 195, C.y - 112, 190, 220, 12); ctx.fill(); // grille
+  ctx.fillStyle = '#6b5a48'; for (let j = 0; j < 9; j++) for (let i = 0; i < 8; i++) { circ(C.x - 180 + i * 23, C.y - 96 + j * 23.5, 5); ctx.fill(); }
+  ctx.fillStyle = '#f1e7cc'; rr(C.x + 15, C.y - 112, 180, 96, 8); ctx.fill(); // dial window
+  ctx.strokeStyle = PAL.ink; ctx.lineWidth = 1.5;
+  for (let f = 540; f <= 1600; f += 53) { const x = C.x + 27 + (f - 540) / 1060 * 156; ctx.beginPath(); ctx.moveTo(x, C.y - 70); ctx.lineTo(x, C.y - (((f - 540) / 53) % 5 === 0 ? 50 : 58)); ctx.stroke(); }
+  [540, 800, 1070, 1330, 1600].forEach(f => text(String(f), C.x + 27 + (f - 540) / 1060 * 156, C.y - 90, 14, PAL.ink));
+  text('中波 千赫', C.x + 105, C.y - 34, 14, '#6b5a48');
+  const nx = C.x + 27 + (state.freq - 540) / 1060 * 156; ctx.strokeStyle = PAL.red; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(nx, C.y - 104); ctx.lineTo(nx, C.y - 24); ctx.stroke();
+  knob(C.x + 60, C.y + 78, false, 2.2);
+  knob(KNOB.x, KNOB.y, state.choice !== 'a', state.freq / 60);
+  if (state.choice === 'a') { /* a new, matching knob */ }
+  text('音量', C.x + 60, C.y + 28, 14, '#f1c9b8'); text('调谐', KNOB.x, C.y + 28, 14, '#f1c9b8');
+  ctx.save(); rr(C.x - 215, C.y - 135, 430, 270, 20); ctx.clip(); grime('rgba(170,160,138,A)', 0.62); ctx.restore();
+}
+function radioBack() {
+  radioBody();
+  if (!isDone('open')) {
+    ctx.fillStyle = '#b58a6a'; rr(C.x - 200, C.y - 120, 400, 240, 12); ctx.fill();
+    ctx.fillStyle = '#8f6a50'; for (let i = 0; i < 9; i++) { rr(C.x - 150, C.y - 70 + i * 16, 300, 6, 3); ctx.fill(); }
+    text('背面', C.x, C.y - 96, 16, '#5a3a2a');
+  } else {
+    ctx.fillStyle = '#2c2520'; rr(C.x - 200, C.y - 120, 400, 240, 12); ctx.fill();
+    ctx.fillStyle = '#5a5046'; circ(C.x - 110, C.y - 20, 70); ctx.fill(); ctx.fillStyle = '#3d362f'; circ(C.x - 110, C.y - 20, 34); ctx.fill(); ctx.fillStyle = '#7a6f62'; circ(C.x - 110, C.y - 20, 14); ctx.fill(); // speaker
+    ctx.fillStyle = '#3f6b4f'; rr(C.x + 20, C.y - 104, 160, 120, 6); ctx.fill(); // board
+    ctx.fillStyle = '#d2b672'; [[40, -84], [90, -70], [150, -88], [60, -30], [150, -40]].forEach(p => { rr(C.x + p[0], C.y + p[1], 22, 12, 3); ctx.fill(); });
+    ctx.fillStyle = '#cfd3d6'; circ(DECOY.x, DECOY.y, 9); ctx.fill(); ctx.fillStyle = '#eef0f1'; circ(DECOY.x - 2, DECOY.y - 2, 4); ctx.fill(); // a good joint
+    ctx.fillStyle = '#4a4038'; rr(C.x + 20, C.y + 40, 170, 66, 8); ctx.fill(); // battery bay
+    ctx.fillStyle = '#c9a45c'; rr(C.x + 30, C.y + 50, 70, 22, 5); ctx.fill(); rr(C.x + 30, C.y + 76, 70, 22, 5); ctx.fill();
+    ctx.save(); ctx.translate(C.x + 150, C.y + 72); ctx.rotate(0.12); ctx.fillStyle = PAL.paper; rr(-36, -26, 72, 52, 3); ctx.fill(); // the note
+    text('七点半', 0, -12, 14, PAL.ink); text('县广播', 0, 3, 14, PAL.ink); text('1035', 0, 18, 14, PAL.red, 'center', 'bold'); ctx.restore();
+    ctx.strokeStyle = '#c0392b'; ctx.lineWidth = 4; ctx.lineCap = 'round'; // the speaker wire, torn
+    ctx.beginPath(); ctx.moveTo(C.x + 40, C.y + 14); ctx.bezierCurveTo(C.x, C.y + 80, C.x - 30, C.y + 90, BREAK.x + 14, BREAK.y + 4); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(C.x - 110, C.y + 40); ctx.quadraticCurveTo(C.x - 110, C.y + 70, BREAK.x - 14, BREAK.y - 2); ctx.stroke(); ctx.lineCap = 'butt';
+    if (isDone('solder')) { ctx.fillStyle = '#cfd3d6'; circ(BREAK.x, BREAK.y + 1, 12); ctx.fill(); ctx.fillStyle = '#f4f6f7'; circ(BREAK.x - 3, BREAK.y - 2, 5); ctx.fill(); }
+    else { ctx.strokeStyle = '#e0b060'; ctx.lineWidth = 1.5; for (let i = -1; i <= 1; i++) { ctx.beginPath(); ctx.moveTo(BREAK.x + 14, BREAK.y + 4); ctx.lineTo(BREAK.x + 5, BREAK.y + 4 + i * 5); ctx.stroke(); ctx.beginPath(); ctx.moveTo(BREAK.x - 14, BREAK.y - 2); ctx.lineTo(BREAK.x - 5, BREAK.y - 2 + i * 5); ctx.stroke(); }
+      if (state.prog.solder > 0) { ctx.fillStyle = `rgba(255,180,80,${0.3 + state.prog.solder * 0.6})`; circ(BREAK.x, BREAK.y, 6 + state.prog.solder * 8); ctx.fill(); } }
+  }
+  SCREWS.forEach((p, i) => { const v = state.screws[i], x = C.x + p[0], y = C.y + p[1]; // each screw backs out and drops
+    if (v >= 1) { ctx.fillStyle = '#1e1814'; circ(x, y, 8); ctx.fill(); return; }
+    ctx.fillStyle = '#cfd3d6'; circ(x, y, 12); ctx.fill(); ctx.strokeStyle = '#6b6f72'; ctx.lineWidth = 3; const a = v * 9; ctx.beginPath(); ctx.moveTo(x - Math.cos(a) * 9, y - Math.sin(a) * 9); ctx.lineTo(x + Math.cos(a) * 9, y + Math.sin(a) * 9); ctx.stroke(); });
+}
+
+// ---- Drawing: tools, people ---------------------------------------------------------------------
+function drawTool(id, x, y, s = 1, ang = 0) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(ang); ctx.scale(s, s);
+  if (id === 'cloth') { ctx.fillStyle = '#e8c9a0'; ctx.beginPath(); ctx.moveTo(-30, -18); ctx.quadraticCurveTo(0, -30, 30, -16); ctx.quadraticCurveTo(38, 4, 26, 20); ctx.quadraticCurveTo(0, 28, -28, 18); ctx.quadraticCurveTo(-38, 0, -30, -18); ctx.fill(); ctx.strokeStyle = '#c9a57a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-18, -6); ctx.quadraticCurveTo(0, 6, 20, -4); ctx.moveTo(-14, 8); ctx.quadraticCurveTo(2, 16, 16, 8); ctx.stroke(); }
+  else if (id === 'driver') { ctx.fillStyle = PAL.red; rr(-8, 0, 16, 46, 7); ctx.fill(); ctx.fillStyle = '#8f3428'; rr(-8, 10, 16, 5, 2); ctx.fill(); rr(-8, 24, 16, 5, 2); ctx.fill(); ctx.fillStyle = PAL.steel; rr(-3, -40, 6, 42, 2); ctx.fill(); ctx.fillStyle = '#9da2a6'; ctx.beginPath(); ctx.moveTo(-4, -40); ctx.lineTo(4, -40); ctx.lineTo(2, -48); ctx.lineTo(-2, -48); ctx.fill(); }
+  else if (id === 'iron') { ctx.fillStyle = '#3b6b8a'; rr(-9, 2, 18, 44, 6); ctx.fill(); ctx.fillStyle = '#2a2a2a'; rr(-5, -8, 10, 12, 2); ctx.fill(); ctx.fillStyle = '#b9b0a0'; rr(-3, -36, 6, 30, 2); ctx.fill(); ctx.fillStyle = '#e8763a'; ctx.beginPath(); ctx.moveTo(-3, -36); ctx.lineTo(3, -36); ctx.lineTo(0, -48); ctx.fill(); ctx.strokeStyle = '#2a2a2a'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(0, 46); ctx.quadraticCurveTo(14, 58, 4, 66); ctx.stroke(); }
+  else { ctx.fillStyle = '#e9b98f'; rr(-18, -4, 36, 34, 12); ctx.fill(); [-14, -5, 4, 13].forEach((fx, i) => { rr(fx - 4, -30 + Math.abs(i - 1.5) * 5, 9, 32, 4); ctx.fill(); }); ctx.save(); ctx.rotate(-0.7); rr(-34, -2, 12, 26, 5); ctx.fill(); ctx.restore(); ctx.strokeStyle = '#c99466'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(-10, 8); ctx.quadraticCurveTo(0, 14, 12, 6); ctx.stroke(); }
+  ctx.restore();
+}
+function person(who, x, y, s = 1) {
+  ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+  if (who === '周奶奶') { // a bun, a padded jacket, round shoulders
+    ctx.fillStyle = '#5b6a8a'; ctx.beginPath(); ctx.moveTo(-46, 60); ctx.quadraticCurveTo(-44, 10, 0, 8); ctx.quadraticCurveTo(44, 10, 46, 60); ctx.fill();
+    ctx.fillStyle = '#e8c3a0'; circ(0, -14, 26); ctx.fill(); ctx.fillStyle = '#d9d6d0'; ctx.beginPath(); ctx.arc(0, -20, 27, 3.3, 6.1); ctx.fill(); circ(0, -46, 12); ctx.fill();
+    ctx.strokeStyle = '#3b2c22'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(-9, -12, 4, 3.4, 6); ctx.stroke(); ctx.beginPath(); ctx.arc(9, -12, 4, 3.4, 6); ctx.stroke(); ctx.beginPath(); ctx.arc(0, -2, 7, 0.3, 2.8); ctx.stroke();
+    ctx.strokeStyle = '#46526e'; ctx.beginPath(); ctx.moveTo(0, 10); ctx.lineTo(0, 60); ctx.stroke();
+  } else { // a flat cap, a work jacket, square shoulders
+    ctx.fillStyle = '#4f6b5c'; ctx.beginPath(); ctx.moveTo(-52, 60); ctx.lineTo(-48, 14); ctx.lineTo(-14, 6); ctx.lineTo(14, 6); ctx.lineTo(48, 14); ctx.lineTo(52, 60); ctx.fill();
+    ctx.fillStyle = '#e2b48c'; rr(-22, -40, 44, 50, 16); ctx.fill(); ctx.fillStyle = '#3b3f4a'; ctx.beginPath(); ctx.moveTo(-26, -30); ctx.quadraticCurveTo(0, -58, 26, -30); ctx.lineTo(40, -26); ctx.lineTo(26, -24); ctx.fill();
+    ctx.fillStyle = '#3b2c22'; circ(-9, -14, 2.5); ctx.fill(); circ(9, -14, 2.5); ctx.fill(); ctx.strokeStyle = '#3b2c22'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-7, 0); ctx.lineTo(8, -1); ctx.stroke();
+    ctx.strokeStyle = '#3f574b'; ctx.beginPath(); ctx.moveTo(-14, 6); ctx.lineTo(0, 26); ctx.lineTo(14, 6); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// ---- Drawing: the memories (faded, snowing) --------------------------------------------------------
+function snow(x, y, w, h, n, k) { ctx.fillStyle = 'rgba(255,255,255,0.85)'; for (let i = 0; i < n; i++) { const sx = x + ((i * 97.3 + Math.sin(state.t * 0.6 + i) * 8 + w * 2) % w), sy = y + ((i * 53.7 + state.t * (14 + (i % 5) * 5) * k) % h); circ(sx, sy, 1 + (i % 3) * 0.7); ctx.fill(); } }
+function memoryScene(i, x, y, w, h) {
+  ctx.save(); rr(x, y, w, h, 4); ctx.clip(); const u = w / 300; ctx.translate(x, y); ctx.scale(u, u); const hh = h / u;
+  if (i === 0) { // the walk to the factory gate
+    const g = ctx.createLinearGradient(0, 0, 0, hh); g.addColorStop(0, '#4a5a78'); g.addColorStop(0.6, '#8b93a8'); g.addColorStop(1, '#dfe3ea'); ctx.fillStyle = g; ctx.fillRect(0, 0, 300, hh);
+    ctx.fillStyle = '#e9edf2'; ctx.beginPath(); ctx.moveTo(0, hh * 0.72); ctx.quadraticCurveTo(150, hh * 0.64, 300, hh * 0.74); ctx.lineTo(300, hh); ctx.lineTo(0, hh); ctx.fill();
+    ctx.fillStyle = '#5c5048'; ctx.fillRect(196, hh * 0.3, 14, hh * 0.42); ctx.fillRect(262, hh * 0.3, 14, hh * 0.42); ctx.fillStyle = '#6e4038'; ctx.fillRect(190, hh * 0.26, 92, 12);
+    ctx.fillStyle = '#f0e4c8'; ctx.font = `10px ${FONT}`; ctx.textAlign = 'center'; ctx.fillText('纺织厂', 236, hh * 0.26 + 7);
+    const lg = ctx.createRadialGradient(236, hh * 0.44, 2, 236, hh * 0.44, 60); lg.addColorStop(0, 'rgba(255,214,130,0.9)'); lg.addColorStop(1, 'rgba(255,214,130,0)'); ctx.fillStyle = lg; ctx.fillRect(170, hh * 0.2, 130, hh * 0.6);
+    ctx.fillStyle = 'rgba(120,130,150,0.7)'; for (let k = 0; k < 7; k++) { ctx.beginPath(); ctx.ellipse(20 + k * 14, hh * 0.86 - k * 3.4, 3, 1.6, 0, 0, 7); ctx.fill(); }
+    ctx.fillStyle = '#2f3440'; rr(118, hh * 0.56, 16, 30, 5); ctx.fill(); circ(126, hh * 0.52, 7); ctx.fill(); ctx.fillRect(119, hh * 0.56 + 28, 5, 12); ctx.fillRect(128, hh * 0.56 + 28, 5, 12);
+    ctx.fillStyle = '#b5483a'; rr(120, hh * 0.56 + 2, 12, 5, 2); ctx.fill();
+    snow(0, 0, 300, hh, 46, 1);
+  } else { // the two at the radio, waiting
+    ctx.fillStyle = '#3a2a24'; ctx.fillRect(0, 0, 300, hh);
+    ctx.fillStyle = '#56637e'; rr(26, hh * 0.12, 96, hh * 0.46, 3); ctx.fill(); ctx.save(); rr(26, hh * 0.12, 96, hh * 0.46, 3); ctx.clip(); snow(26, hh * 0.12, 96, hh * 0.46, 22, 0.7); ctx.restore();
+    ctx.strokeStyle = '#2a1d18'; ctx.lineWidth = 4; ctx.strokeRect(26, hh * 0.12, 96, hh * 0.46); ctx.beginPath(); ctx.moveTo(74, hh * 0.12); ctx.lineTo(74, hh * 0.58); ctx.stroke();
+    const lg = ctx.createRadialGradient(200, hh * 0.6, 4, 200, hh * 0.6, 120); lg.addColorStop(0, 'rgba(255,196,110,0.75)'); lg.addColorStop(1, 'rgba(255,196,110,0)'); ctx.fillStyle = lg; ctx.fillRect(60, 0, 240, hh);
+    ctx.fillStyle = '#6a4a36'; ctx.fillRect(130, hh * 0.72, 150, 8); ctx.fillRect(140, hh * 0.72, 8, hh * 0.3); ctx.fillRect(262, hh * 0.72, 8, hh * 0.3);
+    ctx.fillStyle = '#9c3f33'; rr(180, hh * 0.72 - 30, 52, 30, 4); ctx.fill(); ctx.fillStyle = '#d9cdb0'; rr(184, hh * 0.72 - 26, 22, 22, 3); ctx.fill(); ctx.fillStyle = '#e9e6dc'; circ(222, hh * 0.72 - 9, 4); ctx.fill();
+    ctx.fillStyle = '#231a16'; rr(236, hh * 0.44, 30, 56, 10); ctx.fill(); circ(251, hh * 0.38, 12); ctx.fill(); circ(251, hh * 0.3, 6); ctx.fill(); // the mother
+    rr(150, hh * 0.56, 20, 34, 7); ctx.fill(); circ(160, hh * 0.5, 9); ctx.fill(); // the boy
+  }
+  ctx.fillStyle = 'rgba(238,222,190,0.22)'; ctx.fillRect(0, 0, 300, hh); // fade, like an old print
+  ctx.restore();
+}
+function memoryPanel() {
+  const x = 912, y = 88, w = 336, it = item(), n = it.steps.length, k = state.done.length;
+  ctx.fillStyle = 'rgba(40,24,16,0.62)'; rr(x - 14, 26, w + 28, 668, 14); ctx.fill();
+  text('记忆', x, 54, 24, PAL.amber, 'left'); text(`${k} / ${n}`, x + w, 54, 20, PAL.cream, 'right');
+  ctx.fillStyle = PAL.paper; rr(x - 6, y - 6, w + 12, 212, 4); ctx.fill();
+  memoryScene(state.item, x, y, w, 200);
+  for (let i = k; i < n; i++) { // the strips not yet repaired into view
+    const sx = x + i * w / n; ctx.fillStyle = '#d6c7a2'; ctx.fillRect(sx, y, w / n + 1, 200);
+    ctx.strokeStyle = 'rgba(120,100,70,0.5)'; ctx.lineWidth = 1; for (let d = -200; d < w / n; d += 12) { ctx.beginPath(); ctx.moveTo(Math.max(sx, sx + d), y + Math.max(0, -d)); ctx.lineTo(Math.min(sx + w / n, sx + d + 200), y + Math.min(200, w / n - d)); ctx.stroke(); }
+  }
+  if (state.pop > 0) { ctx.fillStyle = `rgba(242,176,74,${state.pop * 0.5})`; ctx.fillRect(x + (k - 1) * w / n, y, w / n, 200); }
+  let cy = y + 236;
+  state.clues.forEach((c, i) => {
+    ctx.fillStyle = PAL.amber; ctx.beginPath(); ctx.moveTo(x + 7, cy - 7); ctx.lineTo(x + 14, cy); ctx.lineTo(x + 7, cy + 7); ctx.lineTo(x, cy); ctx.fill();
+    cy += para(c, x + 24, cy, w - 26, 17, i === state.clues.length - 1 && state.pop > 0 ? '#ffe2a8' : PAL.cream, 1.45) + 12;
+  });
+  if (!state.clues.length) para('还什么都不知道。修一修，看它会露出什么。', x, cy, w, 17, '#cdbb98');
+}
+
+// ---- Drawing: the frame around play --------------------------------------------------------------
+function button(r, label, on, sub) {
+  ctx.fillStyle = on ? PAL.amber : 'rgba(40,24,16,0.62)'; rr(r.x, r.y, r.w, r.h, 10); ctx.fill();
+  ctx.strokeStyle = on ? '#fff0c8' : 'rgba(246,239,220,0.35)'; ctx.lineWidth = 2; rr(r.x, r.y, r.w, r.h, 10); ctx.stroke();
+  text(label, r.x + r.w / 2, r.y + r.h / 2 + (sub ? -8 : 1), 19, on ? PAL.ink : PAL.cream); if (sub) text(sub, r.x + r.w / 2, r.y + r.h / 2 + 14, 15, on ? PAL.ink : '#d9c9a8');
+}
+function tray() {
+  text(item().name, 34, 54, 24, PAL.cream, 'left'); text(`${item().owner}的 · ${state.side === 'front' ? '正面' : '背面'}`, 34, 86, 17, '#f0d9b0', 'left');
+  const ns = nextStep(), glow = item().glow && tune.hint_glow && state.phase === 'work' && ns;
+  TOOLS.forEach((t, i) => { const r = toolRect(i), on = state.tool === t.id;
+    ctx.fillStyle = on ? 'rgba(242,176,74,0.9)' : 'rgba(40,24,16,0.62)'; rr(r.x, r.y, r.w, r.h, 12); ctx.fill();
+    ctx.strokeStyle = on ? '#fff0c8' : 'rgba(246,239,220,0.3)'; ctx.lineWidth = 2; rr(r.x, r.y, r.w, r.h, 12); ctx.stroke();
+    drawTool(t.id, r.x + 46, r.y + 48, 0.72, t.id === 'cloth' || t.id === 'hand' ? 0 : 0.5);
+    text(t.name, r.x + 108, r.y + 36, 19, on ? PAL.ink : PAL.cream); text(String(i + 1), r.x + 108, r.y + 64, 16, on ? PAL.ink : '#d9c9a8');
+    if (glow && ns.tool === t.id && !on) glowRing(r.x + r.w / 2, r.y + r.h / 2, 62);
+  });
+  button(FLIP, '翻面  F', false); button(HINT, '提示  H', false);
+  if (glow && state.tool === ns.tool) {
+    if (ns.side !== state.side) glowRing(FLIP.x + FLIP.w / 2, FLIP.y + FLIP.h / 2, 50);
+    else if (ns.id === 'wind') glowRing(CROWN.x, CROWN.y, 34); else if (ns.id === 'pry') glowRing(C.x, C.y, 138); else glowRing(C.x, C.y, 112);
+  }
+}
+function talkBar(who, line, more) {
+  ctx.fillStyle = 'rgba(30,18,12,0.86)'; rr(214, 584, 680, 112, 14); ctx.fill();
+  ctx.strokeStyle = 'rgba(242,176,74,0.5)'; ctx.lineWidth = 2; rr(214, 584, 680, 112, 14); ctx.stroke();
+  ctx.save(); rr(214, 584, 110, 112, 14); ctx.clip(); person(who, 270, 646, 0.95); ctx.restore();
+  text(who, 340, 608, 18, PAL.amber, 'left'); para(line, 340, 640, 530, 21, PAL.cream, 1.45);
+  if (more) text(more, 878, 684, 15, '#d9c9a8', 'right');
+}
+function drawItem() {
+  if (item().id === 'watch') (state.side === 'front' ? watchFront : watchBack)(); else (state.side === 'front' ? radioFront : radioBack)();
+}
+function pointer() { return down.has('Space') && state.phase === 'work' && state.autoAt ? state.autoAt : [mouse.x, mouse.y]; }
+
+// ---- Scenes ---------------------------------------------------------------------------------------
+const advance = () => pressed('Enter') || pressed('Space') || mouse.clicked;
+const scenes = {
+  figures: {
+    update(dt) { state.t += dt; },
+    draw() {
+      ctx.fillStyle = '#7a4d33'; ctx.fillRect(0, 0, W, H);
+      const put = (name, x, fn) => { fn(); text(name, x, 660, 20, PAL.cream); };
+      put('周奶奶', 110, () => person('周奶奶', 110, 520, 1.3)); put('小陈', 290, () => person('小陈', 290, 520, 1.3));
+      TOOLS.forEach((t, i) => put(t.name, 470 + i * 130, () => drawTool(t.id, 470 + i * 130, 540, 1.4)));
+      const save = [state.item, state.side]; state.grid.a.fill(0);
+      ctx.save(); ctx.translate(-60, 40); ctx.scale(0.6, 0.6); state.mini = true; state.item = 0; state.side = 'front'; watchFront(); ctx.restore(); state.mini = false; text('手表', 276, 430, 20, PAL.cream); state.mini = true;
+      ctx.save(); ctx.translate(430, 40); ctx.scale(0.6, 0.6); state.item = 1; radioFront(); state.mini = false; ctx.restore(); text('收音机', 766, 430, 20, PAL.cream);
+      [state.item, state.side] = save;
+      memoryScene(0, 1010, 60, 230, 150); text('记忆：雪路', 1125, 232, 20, PAL.cream); memoryScene(1, 1010, 290, 230, 150); text('记忆：等广播', 1125, 462, 20, PAL.cream);
+    },
+  },
+  title: {
+    update(dt) { state.t += dt; if (advance()) { reset(); scene = 'play'; sfx.click(); } },
+    draw() {
+      bench(); motes();
+      ctx.fillStyle = 'rgba(30,18,12,0.72)'; rr(250, 110, 780, 500, 20); ctx.fill();
+      text(TITLE, W / 2, 200, 66, PAL.cream); text('修一件旧物，留下一段记忆', W / 2, 268, 24, PAL.amber);
+      CONTROLS.forEach((c, i) => text(c, W / 2, 350 + i * 44, 22, '#ecdcb8'));
+      text('点一下，或按回车，开张', W / 2, 540, 26, `rgba(246,239,220,${0.6 + 0.4 * Math.sin(state.t * 3)})`);
+    },
+  },
+  play: {
+    update(dt) {
+      state.t += dt; state.phaseT += dt; state.pop = Math.max(0, state.pop - dt * 1.2); state.msgT = Math.max(0, state.msgT - dt);
+      const it = item();
+      if (state.phase === 'arrive') { if (advance()) { sfx.click(); if (++state.line >= it.arrive.length) { state.phase = 'work'; state.phaseT = 0; } } return; }
+      if (state.phase === 'work') {
+        TOOLS.forEach((t, i) => { if (pressed(t.key) || (mouse.clicked && inside(toolRect(i), mouse.x, mouse.y))) { state.tool = t.id; sfx.click(); } });
+        if (pressed('KeyF') || (mouse.clicked && inside(FLIP, mouse.x, mouse.y))) flip();
+        if (pressed('KeyH') || (mouse.clicked && inside(HINT, mouse.x, mouse.y))) hint();
+        if (down.has('Space')) {
+          const ns = nextStep();
+          if (!state.tool) { if (pressed('Space')) say('先拿起一件工具（1-4）。'); }
+          else { const s = it.steps.find(q => q.tool === state.tool && !isDone(q.id)) || ns; const [ax, ay] = autoTarget(s, state.t); const p = state.autoAt || [ax, ay];
+            state.autoAt = [ax, ay]; work(ax, ay, Math.hypot(ax - p[0], ay - p[1]) + 0.01, 0, dt, true); }
+        } else { state.autoAt = null; if (mouse.down && mouse.x > 200 && mouse.x < 900 && mouse.y < 580) work(mouse.x, mouse.y, mouse.moved, mouse.dx, dt, false); }
+        if (isDone('wind') && state.windAt == null) state.windAt = state.t;
+        if (it.id === 'radio') tuneListen(dt);
+        if (isDone('wind') && Math.floor(state.t) !== Math.floor(state.t - dt)) sfx.tick();
+        return;
+      }
+      if (state.phase === 'choice') {
+        if (state.phaseT < 0.4) return;
+        let c = ''; if (pressed('Digit1') || (mouse.clicked && inside(CH_A, mouse.x, mouse.y))) c = 'a'; if (pressed('Digit2') || (mouse.clicked && inside(CH_B, mouse.x, mouse.y))) c = 'b';
+        if (c) { state.choice = c; state.side = 'front'; state.phase = 'memory'; state.phaseT = 0; sfx.done(); events.push({ choice: it.id + ':' + c }); }
+        return;
+      }
+      if (state.phase === 'memory') { if (state.phaseT > 0.6 && advance()) { state.phase = 'return'; state.line = 0; state.phaseT = 0; sfx.click(); } return; }
+      if (state.phase === 'return') {
+        if (state.phaseT > 0.3 && advance()) { sfx.click(); state.phaseT = 0;
+          if (++state.line >= it.back[state.choice].length) { state.shelf.push({ item: state.item, choice: state.choice }); state.windAt = null;
+            if (state.item + 1 < ITEMS.length) startItem(state.item + 1); else { state.gained = '两段记忆，同一场雪'; scene = 'results'; state.phaseT = 0; sfx.done(); } } }
+      }
+    },
+    draw() {
+      bench(); drawItem(); motes(); tray(); memoryPanel();
+      const it = item();
+      if (state.phase === 'arrive') talkBar(it.owner, it.arrive[state.line], '点一下继续');
+      else if (state.phase === 'work') {
+        if (state.msgT > 0) { ctx.globalAlpha = Math.min(1, state.msgT * 2); ctx.fillStyle = 'rgba(30,18,12,0.86)'; rr(214, 606, 680, 78, 14); ctx.fill(); para(state.msg, 238, 632, 636, 19, PAL.cream, 1.4); ctx.globalAlpha = 1; }
+        else if (it.id === 'radio' && isDone('solder') && !isDone('tune') && state.side === 'front') { // the broadcast, clearer the nearer the needle
+          const d = Math.abs(state.freq - tune.tune_target), clear = Math.max(0, 1 - d / 160), src = '受大雪影响，纺织厂夜班班车今晚停运。司机陈德山同志已步行护送工人回城';
+          let out = ''; for (let i = 0; i < src.length; i++) out += (Math.sin(i * 12.9898 + Math.floor(state.t * 6) * 0.7) * 0.5 + 0.5) < clear ? src[i] : '沙';
+          ctx.fillStyle = 'rgba(30,18,12,0.86)'; rr(214, 606, 680, 78, 14); ctx.fill(); para(out, 238, 632, 636, 19, clear > 0.6 ? '#ffe2a8' : '#cdbb98', 1.4);
+        } else if (!state.tool) text('从左边拿一件工具', C.x, 640, 20, 'rgba(246,239,220,0.8)');
+      } else if (state.phase === 'choice') {
+        ctx.fillStyle = 'rgba(30,18,12,0.86)'; rr(C.x - 280, 540, 560, 136, 14); ctx.fill();
+        text(it.choice.ask, C.x, 570, 22, PAL.cream); button(CH_A, '1  ' + it.choice.a, false); button(CH_B, '2  ' + it.choice.b, false);
+      } else if (state.phase === 'memory') {
+        const a = Math.min(1, state.phaseT * 1.5); ctx.globalAlpha = a; ctx.fillStyle = 'rgba(20,12,8,0.86)'; ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = PAL.paper; rr(332, 68, 616, 380, 6); ctx.fill(); memoryScene(state.item, 344, 80, 592, 356);
+        para(it.memory, 250, 486, 780, 22, PAL.cream, 1.6); text('这段记忆留在店里了。点一下继续', W / 2, 680, 17, PAL.amber); ctx.globalAlpha = 1;
+      } else if (state.phase === 'return') talkBar(it.owner, it.back[state.choice][state.line], '点一下继续');
+      if (state.phase === 'work') drawTool(state.tool || 'hand', pointer()[0], pointer()[1] + (state.tool === 'cloth' || !state.tool ? 0 : 30), 1, state.tool === 'driver' || state.tool === 'iron' ? -0.5 : 0);
+      else { ctx.fillStyle = PAL.cream; circ(mouse.x, mouse.y, 6); ctx.fill(); ctx.strokeStyle = PAL.ink; ctx.lineWidth = 2; circ(mouse.x, mouse.y, 6); ctx.stroke(); }
+      text(muted ? 'M 开声音' : 'M 静音', 34, 700, 15, 'rgba(246,239,220,0.7)', 'left');
+    },
+  },
+  results: { // the shelf: what stays in the shop
+    update(dt) { state.t += dt; state.phaseT += dt; if (pressed('KeyR') || (state.phaseT > 1 && pressed('Enter'))) { reset(); scene = 'play'; } },
+    draw() {
+      const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#4a3226'); g.addColorStop(1, '#2a1a12'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+      const l = ctx.createRadialGradient(W / 2, 250, 40, W / 2, 250, 620); l.addColorStop(0, 'rgba(255,220,150,0.28)'); l.addColorStop(1, 'rgba(255,220,150,0)'); ctx.fillStyle = l; ctx.fillRect(0, 0, W, H);
+      text('店里的架子', W / 2, 54, 34, PAL.cream);
+      ctx.fillStyle = '#8a5a3c'; rr(120, 396, 1040, 20, 4); ctx.fill(); ctx.fillStyle = '#5a3a2a'; rr(120, 414, 1040, 8, 3); ctx.fill();
+      const keep = [state.item, state.side, state.choice, state.freq];
+      state.shelf.forEach((sh, i) => { const cx = 360 + i * 560; state.item = sh.item; state.side = 'front'; state.choice = sh.choice; state.grid.a.fill(0);
+        ctx.fillStyle = PAL.paper; rr(cx - 150, 84, 300, 186, 4); ctx.fill(); memoryScene(sh.item, cx - 142, 92, 284, 170);
+        ctx.save(); ctx.translate(cx - C.x * 0.3, 352 - C.y * 0.3 - (sh.item === 0 ? 0 : 0)); ctx.scale(0.3, 0.3); state.mini = true; (sh.item === 0 ? watchFront : radioFront)(); state.mini = false; ctx.restore();
+        text(ITEMS[sh.item].owner + ' · ' + ITEMS[sh.item].kept[sh.choice], cx, 446, 19, '#ecdcb8'); });
+      [state.item, state.side, state.choice, state.freq] = keep;
+      if (state.shelf.length > 1) { const a = Math.min(1, state.phaseT / 2); ctx.strokeStyle = PAL.amber; ctx.lineWidth = 3; ctx.setLineDash([3, 9]); ctx.lineCap = 'round'; ctx.beginPath();
+        for (let k = 0; k <= 40 * a; k++) { const u = k / 40, x = 510 + u * 260, y = 176 - Math.sin(u * 3.1416) * 46; k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); } ctx.stroke(); ctx.setLineDash([]); ctx.lineCap = 'butt';
+        ctx.globalAlpha = Math.max(0, Math.min(1, state.phaseT - 1.6)); text('同一场雪', W / 2, 110, 22, PAL.amber); para(LINK, W / 2, 506, 860, 24, PAL.cream, 1.6, 'center'); ctx.globalAlpha = 1; }
+      text('R 重新开张', W / 2, 672, 20, '#d9c9a8');
+    },
+  },
+};
+
+// ---- Loop: fixed step, frame time clamped ---------------------------------------------
+function step() {
+  if (pressed('KeyM')) { setMuted(!muted); hit.delete('KeyM'); }
+  scenes[scene].update(STEP); hit.clear(); mouse.clicked = false; mouse.moved = 0; mouse.dx = 0; mouse.dy = 0;
+}
+let last, acc = 0, ALPHA = 1;
+function tick() {
+  const now = clock.now();
+  acc += Math.min(now - last, 0.25); last = now;
+  while (acc >= STEP) { step(); acc -= STEP; }
+  ALPHA = acc / STEP;
+  drawFrame();
+}
+function drawFrame() { scenes[scene].draw(); }
+function frame() { tick(); requestAnimationFrame(frame); }
+function timer() { if (document.visibilityState === 'visible' && clock.now() - last > 0.1) tick(); }
+
+// ---- What a check can read and drive (?manual=1 stops the loop; players never see it) ----
+window.game = {
+  get scene() { return scene; },
+  get state() { return state; },
+  press(code) { hit.add(code); },
+  hold(code, on) { on ? down.add(code) : down.delete(code); },
+  get events() { return events; },
+  step(n = 1, draw = true, alpha = 1) {
+    for (let i = 0; i < n; i++) step();
+    if (draw) { ALPHA = alpha; drawFrame(); }
+  },
+};
+
+reset();
+scene = params.get('scene') || 'title';
+last = clock.now();
+if (params.get('manual') === '1') drawFrame();
+else { requestAnimationFrame(frame); setInterval(timer, 50); }
+</script>
+</body>
+</html>
